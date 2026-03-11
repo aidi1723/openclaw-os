@@ -12,6 +12,7 @@ pnpm-debug.log*
 
 # Local data
 .webhook-connector/
+.openclaw-data/
 
 # OS/editor
 .DS_Store
@@ -21,4 +22,3 @@ pnpm-debug.log*
 # Env
 .env
 .env.*
-

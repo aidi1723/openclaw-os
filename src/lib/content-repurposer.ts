@@ -1,3 +1,5 @@
+import type { CreatorWorkflowMeta } from "@/lib/creator-workflow";
+
 export type RepurposeSourceType =
   | "youtube"
   | "podcast"
@@ -13,9 +15,11 @@ export type ContentRepurposerProject = {
   goal: string;
   sourceContent: string;
   contentPack: string;
+  workflowSource?: string;
+  workflowNextStep?: string;
   createdAt: number;
   updatedAt: number;
-};
+} & CreatorWorkflowMeta;
 
 type Listener = () => void;
 
@@ -66,6 +70,12 @@ export function createContentRepurposerProject(
     goal: input?.goal ?? "",
     sourceContent: input?.sourceContent ?? "",
     contentPack: input?.contentPack ?? "",
+    workflowRunId: input?.workflowRunId,
+    workflowScenarioId: input?.workflowScenarioId,
+    workflowStageId: input?.workflowStageId,
+    workflowSource: input?.workflowSource?.trim() || undefined,
+    workflowNextStep: input?.workflowNextStep?.trim() || undefined,
+    workflowTriggerType: input?.workflowTriggerType,
     createdAt: now,
     updatedAt: now,
   };

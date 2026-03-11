@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { FilePlus2, Plus, RefreshCw, Sparkles, Trash2 } from "lucide-react";
+import { ArrowRight, Copy, FilePlus2, Plus, RefreshCw, Send, Sparkles, Trash2 } from "lucide-react";
 import type { AppWindowProps } from "@/apps/types";
 import { AppToast } from "@/components/AppToast";
+import { CreatorHeroWorkflowPanel } from "@/components/workflows/CreatorHeroWorkflowPanel";
 import { AppWindowShell } from "@/components/windows/AppWindowShell";
 import { useTimedToast } from "@/hooks/useTimedToast";
 import { getOutputLanguageInstruction } from "@/lib/language";
@@ -16,10 +17,18 @@ import {
   type ContentRepurposerProject,
   type RepurposeSourceType,
 } from "@/lib/content-repurposer";
+import { upsertCreatorAsset } from "@/lib/creator-assets";
+import { buildCreatorWorkflowMeta, getCreatorWorkflowScenario } from "@/lib/creator-workflow";
 import { createDraft } from "@/lib/drafts";
 import { requestOpenClawAgent } from "@/lib/openclaw-agent-client";
 import { createTask, updateTask } from "@/lib/tasks";
-import { requestOpenApp, type ContentRepurposerPrefill } from "@/lib/ui-events";
+import { requestOpenPublisher, type ContentRepurposerPrefill } from "@/lib/ui-events";
+import {
+  advanceWorkflowRun,
+  getWorkflowRun,
+  startWorkflowRun,
+  type WorkflowTriggerType,
+} from "@/lib/workflow-runs";
 
 const sourceTypes: Array<{ value: RepurposeSourceType; label: string }> = [
   { value: "youtube", label: "YouTube / 长视频" },
@@ -48,6 +57,96 @@ function buildLocalPack(project: ContentRepurposerProject) {
     "【邮件 / newsletter 摘要】",
     "用 3 段写清背景、核心洞察和下一步建议，方便发给订阅用户或团队。",
   ].join("\n");
+}
+
+function getDefaultTriggerType(project: ContentRepurposerProject): WorkflowTriggerType {
+  return project.workflowTriggerType ?? "manual";
+}
+
+function extractLeadLine(content: string, fallback: string) {
+  const line = content
+    .split(/\r?\n/)
+    .map((item) => item.replace(/^[\-*#【】\s]+/g, "").trim())
+    .find(Boolean);
+  return line || fallback;
+}
+
+type ContentPackBlock = {
+  id: string;
+  label: string;
+  body: string;
+  summary: string;
+  suggestedPlatforms: ("xiaohongshu" | "douyin" | "tiktok" | "instagram")[];
+};
+
+type SuggestedPlatform = ContentPackBlock["suggestedPlatforms"][number];
+
+function normalizeBlockMeta(label: string) {
+  const key = label.toLowerCase();
+  if (key.includes("短视频") || key.includes("口播") || key.includes("video") || key.includes("reel")) {
+    return { suggestedPlatforms: ["douyin", "tiktok"] as const };
+  }
+  if (key.includes("newsletter") || key.includes("邮件") || key.includes("email")) {
+    return { suggestedPlatforms: ["xiaohongshu", "instagram"] as const };
+  }
+  return { suggestedPlatforms: ["xiaohongshu", "instagram"] as const };
+}
+
+function parseContentPackBlocks(content: string) {
+  const text = content.trim();
+  if (!text) return [] as ContentPackBlock[];
+
+  const lines = text.split(/\r?\n/);
+  const blocks: Array<{ label: string; lines: string[] }> = [];
+  let current: { label: string; lines: string[] } | null = null;
+
+  for (const rawLine of lines) {
+    const line = rawLine.trimEnd();
+    const bracketHeading = line.match(/^【(.+?)】\s*$/);
+    const markdownHeading = line.match(/^#{1,3}\s+(.+?)\s*$/);
+    const heading = bracketHeading?.[1] ?? markdownHeading?.[1] ?? null;
+
+    if (heading) {
+      const next = { label: heading.trim(), lines: [] as string[] };
+      blocks.push(next);
+      current = next;
+      continue;
+    }
+
+    if (!current) {
+      current = { label: "内容包", lines: [] };
+      blocks.push(current);
+    }
+    current.lines.push(rawLine);
+  }
+
+  const parsed = blocks
+    .map((block, index) => {
+      const body = block.lines.join("\n").trim();
+      if (!body) return null;
+      if (block.label === "Repurpose Pack" || block.label === "内容包") return null;
+      const summary = body.replace(/\s+/g, " ").slice(0, 88);
+      return {
+        id: `${index}-${block.label}`,
+        label: block.label,
+        body,
+        summary: summary || "可继续编辑后投递到下一步。",
+        suggestedPlatforms: [...normalizeBlockMeta(block.label).suggestedPlatforms] as SuggestedPlatform[],
+      } satisfies ContentPackBlock;
+    })
+    .filter((block): block is ContentPackBlock => Boolean(block));
+
+  if (parsed.length > 0) return parsed;
+
+  return [
+    {
+      id: "full-pack",
+      label: "完整内容包",
+      body: text,
+      summary: text.replace(/\s+/g, " ").slice(0, 88) || "可继续编辑后投递到下一步。",
+      suggestedPlatforms: ["xiaohongshu", "instagram"] as SuggestedPlatform[],
+    },
+  ];
 }
 
 export function ContentRepurposerAppWindow({
@@ -90,6 +189,9 @@ export function ContentRepurposerAppWindow({
         audience: detail?.audience ?? "",
         goal: detail?.goal ?? "",
         sourceContent: detail?.sourceContent ?? "",
+        workflowSource: detail?.workflowSource ?? "",
+        workflowNextStep: detail?.workflowNextStep ?? "",
+        ...buildCreatorWorkflowMeta(detail),
       });
       setSelectedId(id);
       showToast("已带入 repurpose 上下文", "ok");
@@ -99,9 +201,27 @@ export function ContentRepurposerAppWindow({
       window.removeEventListener("openclaw:content-repurposer-prefill", onPrefill);
   }, [showToast]);
 
+  useEffect(() => {
+    const onSelect = (event: Event) => {
+      const projectId = (event as CustomEvent<{ projectId?: string }>).detail?.projectId;
+      if (!projectId) return;
+      const targetProject = getContentRepurposerProjects().find((project) => project.id === projectId);
+      if (!targetProject) return;
+      setSelectedId(targetProject.id);
+      showToast("已定位到内容拆解项目", "ok");
+    };
+    window.addEventListener("openclaw:content-repurposer-select", onSelect);
+    return () =>
+      window.removeEventListener("openclaw:content-repurposer-select", onSelect);
+  }, [showToast]);
+
   const selected = useMemo(
     () => projects.find((project) => project.id === selectedId) ?? null,
     [projects, selectedId],
+  );
+  const contentBlocks = useMemo(
+    () => parseContentPackBlocks(selected?.contentPack ?? ""),
+    [selected?.contentPack],
   );
 
   const patchSelected = (
@@ -124,11 +244,42 @@ export function ContentRepurposerAppWindow({
     showToast("repurpose pack 已删除", "ok");
   };
 
+  const ensureWorkflowForSelected = (triggerType?: WorkflowTriggerType) => {
+    if (!selected) return null;
+    const resolvedTriggerType = triggerType ?? getDefaultTriggerType(selected);
+    if (selected.workflowRunId) return selected.workflowRunId;
+    const scenario = getCreatorWorkflowScenario();
+    if (!scenario) return null;
+    const runId = startWorkflowRun(scenario, resolvedTriggerType);
+    advanceWorkflowRun(runId);
+    patchSelected({
+      workflowRunId: runId,
+      workflowScenarioId: scenario.id,
+      workflowStageId: "repurpose",
+      workflowTriggerType: resolvedTriggerType,
+      workflowSource: "来自 Content Repurposer 的手动内容拆解",
+      workflowNextStep: "先生成多平台内容包，再挑一条送去 Publisher 做发布前检查。",
+    });
+    upsertCreatorAsset(runId, {
+      scenarioId: scenario.id,
+      repurposerProjectId: selected.id,
+      topic: selected.title,
+      audience: selected.audience,
+      primaryAngle: extractLeadLine(selected.sourceContent, selected.title || "内容主线"),
+      latestDigest: selected.sourceContent,
+      nextAction: "先生成多平台内容包，再挑一个版本进入 Publisher。",
+      publishStatus: "repurpose_started",
+      status: "repurposing",
+    });
+    return runId;
+  };
+
   const generatePack = async () => {
     if (!selected) {
       showToast("请先选择项目", "error");
       return;
     }
+    const runId = ensureWorkflowForSelected();
     const fallback = buildLocalPack(selected);
     const taskId = createTask({
       name: "Assistant - Content repurposer",
@@ -155,12 +306,42 @@ export function ContentRepurposerAppWindow({
         sessionId: "webos-content-repurposer",
         timeoutSeconds: 90,
       });
-      patchSelected({ contentPack: text || fallback });
+      const nextPack = text || fallback;
+      const run = runId ? getWorkflowRun(runId) : null;
+      patchSelected({
+        contentPack: nextPack,
+        workflowRunId: runId ?? selected.workflowRunId,
+        workflowScenarioId: selected.workflowScenarioId ?? "creator-studio",
+        workflowStageId: run?.currentStageId === "repurpose" ? "preflight" : selected.workflowStageId,
+        workflowSource: "Content Repurposer 已生成多平台内容包",
+        workflowNextStep: "从内容包里挑 1 个最适合本轮发布的平台版本，送去 Publisher 做预演。",
+      });
+      if (runId) {
+        upsertCreatorAsset(runId, {
+          scenarioId: "creator-studio",
+          repurposerProjectId: selected.id,
+          topic: selected.title,
+          audience: selected.audience,
+          primaryAngle: extractLeadLine(selected.sourceContent, selected.title || "内容主线"),
+          latestDigest: selected.sourceContent,
+          latestPack: nextPack,
+          nextAction: "进入 Publisher 检查标题、CTA 和平台适配，再决定是否自动发布。",
+          publishStatus: "preflight_pending",
+          status: "preflight",
+        });
+        if (run?.currentStageId === "repurpose") {
+          advanceWorkflowRun(runId);
+        }
+      }
       updateTask(taskId, { status: "done" });
       showToast("内容包已生成", "ok");
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "生成失败";
-      patchSelected({ contentPack: fallback });
+      patchSelected({
+        contentPack: fallback,
+        workflowSource: "Content Repurposer 本地兜底生成内容包",
+        workflowNextStep: "建议人工检查内容包后，再送入 Publisher。",
+      });
       updateTask(taskId, { status: "error", detail: errorMessage });
       showToast("OpenClaw 不可用，已切换本地内容包", "error");
     } finally {
@@ -178,6 +359,12 @@ export function ContentRepurposerAppWindow({
       body: selected.contentPack,
       tags: ["repurpose", selected.sourceType],
       source: "import",
+      workflowRunId: selected.workflowRunId,
+      workflowScenarioId: selected.workflowScenarioId,
+      workflowStageId: selected.workflowStageId,
+      workflowTriggerType: selected.workflowTriggerType,
+      workflowSource: selected.workflowSource,
+      workflowNextStep: selected.workflowNextStep,
     });
     showToast("已保存到草稿", "ok");
   };
@@ -187,14 +374,111 @@ export function ContentRepurposerAppWindow({
       showToast("请先生成内容包", "error");
       return;
     }
-    createDraft({
+    const runId = ensureWorkflowForSelected();
+    const run = runId ? getWorkflowRun(runId) : null;
+    const nextStep = "在 Publisher 里先做预演，确认标题、CTA 和平台差异后再决定是否自动发布。";
+    patchSelected({
+      workflowRunId: runId ?? selected.workflowRunId,
+      workflowScenarioId: selected.workflowScenarioId ?? "creator-studio",
+      workflowStageId: run?.currentStageId === "repurpose" ? "preflight" : selected.workflowStageId ?? "preflight",
+      workflowSource: "来自 Content Repurposer 的发布候选稿",
+      workflowNextStep: nextStep,
+    });
+    if (runId) {
+      if (run?.currentStageId === "repurpose") {
+        advanceWorkflowRun(runId);
+      }
+      upsertCreatorAsset(runId, {
+        scenarioId: "creator-studio",
+        repurposerProjectId: selected.id,
+        topic: selected.title,
+        audience: selected.audience,
+        primaryAngle: extractLeadLine(selected.sourceContent, selected.title || "内容主线"),
+        latestDigest: selected.sourceContent,
+        latestPack: selected.contentPack,
+        nextAction: nextStep,
+        publishStatus: "preflight_pending",
+        status: "preflight",
+      });
+    }
+    const draftId = createDraft({
       title: `${selected.title || "Repurpose"} Publish Pack`,
       body: selected.contentPack,
-      tags: ["repurpose", "publish-ready"],
+      tags: ["repurpose", "publish-ready", selected.sourceType],
       source: "import",
+      workflowRunId: runId ?? selected.workflowRunId,
+      workflowScenarioId: selected.workflowScenarioId ?? "creator-studio",
+      workflowStageId: run?.currentStageId === "repurpose" ? "preflight" : selected.workflowStageId ?? "preflight",
+      workflowTriggerType: selected.workflowTriggerType ?? "manual",
+      workflowSource: selected.workflowSource || "来自 Content Repurposer 的发布候选稿",
+      workflowNextStep: nextStep,
     });
-    requestOpenApp("publisher");
+    requestOpenPublisher({
+      draftId,
+      platforms: ["xiaohongshu", "douyin"],
+      dispatchMode: "dry-run",
+      workflowSource: selected.workflowSource || "来自 Content Repurposer 的发布候选稿",
+      workflowNextStep: "建议先做预演，检查平台版本、CTA 和收据，再决定是否自动发布。",
+      workflowRunId: runId ?? selected.workflowRunId,
+      workflowScenarioId: selected.workflowScenarioId ?? "creator-studio",
+      workflowStageId: run?.currentStageId === "repurpose" ? "preflight" : selected.workflowStageId ?? "preflight",
+      workflowTriggerType: selected.workflowTriggerType ?? "manual",
+    });
     showToast("已存草稿并打开发布中心", "ok");
+  };
+
+  const copyBlock = async (block: ContentPackBlock) => {
+    try {
+      await navigator.clipboard.writeText(block.body);
+      showToast(`已复制：${block.label}`, "ok");
+    } catch {
+      showToast("复制失败", "error");
+    }
+  };
+
+  const saveBlockDraft = (block: ContentPackBlock) => {
+    if (!selected) return;
+    createDraft({
+      title: `${selected.title || "Repurpose"} · ${block.label}`,
+      body: block.body,
+      tags: ["repurpose", "section", selected.sourceType, ...block.suggestedPlatforms],
+      source: "import",
+      workflowRunId: selected.workflowRunId,
+      workflowScenarioId: selected.workflowScenarioId,
+      workflowStageId: selected.workflowStageId,
+      workflowTriggerType: selected.workflowTriggerType,
+      workflowSource: selected.workflowSource || "来自 Content Repurposer 的独立内容块",
+      workflowNextStep: `把「${block.label}」作为单独版本继续编辑，或送进 Publisher 做预演。`,
+    });
+    showToast(`已保存片段：${block.label}`, "ok");
+  };
+
+  const sendBlockToPublisher = (block: ContentPackBlock) => {
+    if (!selected) return;
+    const draftId = createDraft({
+      title: `${selected.title || "Repurpose"} · ${block.label}`,
+      body: block.body,
+      tags: ["repurpose", "publish-ready", selected.sourceType, ...block.suggestedPlatforms],
+      source: "import",
+      workflowRunId: selected.workflowRunId,
+      workflowScenarioId: selected.workflowScenarioId,
+      workflowStageId: selected.workflowStageId,
+      workflowTriggerType: selected.workflowTriggerType,
+      workflowSource: selected.workflowSource || `来自 Content Repurposer 的「${block.label}」`,
+      workflowNextStep: `先在 Publisher 里预演「${block.label}」版本，再决定是否进入自动发布。`,
+    });
+    requestOpenPublisher({
+      draftId,
+      platforms: block.suggestedPlatforms,
+      dispatchMode: "dry-run",
+      workflowRunId: selected.workflowRunId,
+      workflowScenarioId: selected.workflowScenarioId,
+      workflowStageId: selected.workflowStageId,
+      workflowTriggerType: selected.workflowTriggerType,
+      workflowSource: selected.workflowSource || `来自 Content Repurposer 的「${block.label}」`,
+      workflowNextStep: `当前送入的是「${block.label}」版本。建议先检查口播/文案结构和平台差异。`,
+    });
+    showToast(`已发送到发布中心：${block.label}`, "ok");
   };
 
   return (
@@ -229,7 +513,30 @@ export function ContentRepurposerAppWindow({
           </div>
         </div>
 
-        <div className="grid grid-cols-1 gap-4 p-4 sm:p-6 xl:grid-cols-[320px_minmax(0,1fr)]">
+        <div className="space-y-4 p-4 sm:p-6">
+          <CreatorHeroWorkflowPanel
+            workflowRunId={selected?.workflowRunId}
+            title={selected ? `${selected.title || "未命名内容包"} · 内容拆解阶段` : "Content Repurposer · Hero Workflow"}
+            description="这一层负责把选题或长内容真正变成可投递的执行版本，让用户看到的不是工具，而是一条会继续流动的内容生产链。"
+            emptyHint="当内容是从 Creator Radar 送过来时，这里会显示同一条内容工作流的运行状态。"
+            source={selected?.workflowSource}
+            nextStep={selected?.workflowNextStep}
+            actions={[
+              {
+                label: "生成内容包",
+                onClick: generatePack,
+                disabled: !selected || isGenerating,
+              },
+              {
+                label: "送去 Publisher",
+                onClick: sendToPublisher,
+                disabled: !selected || !selected?.contentPack.trim(),
+                tone: "secondary",
+              },
+            ]}
+          />
+
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-[320px_minmax(0,1fr)]">
           <aside className="space-y-4">
             <div className="rounded-2xl border border-gray-200 bg-white p-5">
               <div className="flex items-center justify-between gap-2">
@@ -336,6 +643,27 @@ export function ContentRepurposerAppWindow({
                       className="md:col-span-2 h-44 w-full resize-none rounded-2xl border border-gray-300 px-4 py-3 text-sm text-gray-900 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-blue-500"
                     />
                   </div>
+
+                  {selected.workflowSource || selected.workflowNextStep ? (
+                    <div className="mt-4 rounded-[24px] border border-blue-100 bg-[linear-gradient(135deg,#f8fbff_0%,#eef6ff_100%)] p-4">
+                      <div className="flex items-center gap-2 text-sm font-semibold text-gray-900">
+                        <ArrowRight className="h-4 w-4 text-blue-600" />
+                        内容流程上下文
+                      </div>
+                      {selected.workflowSource ? (
+                        <div className="mt-3 text-sm leading-6 text-gray-700">
+                          <span className="font-semibold text-gray-900">来源：</span>
+                          {selected.workflowSource}
+                        </div>
+                      ) : null}
+                      {selected.workflowNextStep ? (
+                        <div className="mt-2 text-sm leading-6 text-gray-700">
+                          <span className="font-semibold text-gray-900">建议下一步：</span>
+                          {selected.workflowNextStep}
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
                 </>
               ) : (
                 <div className="rounded-2xl border border-dashed border-gray-200 bg-gray-50 p-8 text-center text-sm text-gray-500">
@@ -388,7 +716,87 @@ export function ContentRepurposerAppWindow({
                 className="mt-4 h-[340px] w-full resize-none rounded-2xl border border-gray-300 px-4 py-3 text-sm leading-6 text-gray-900 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
+
+            <div className="rounded-[28px] border border-gray-200 bg-white p-5 shadow-[0_18px_60px_rgba(15,23,42,0.05)]">
+              <div className="flex flex-col gap-3 border-b border-gray-200 pb-4 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <div className="text-sm font-semibold text-gray-900">可直接投递的内容块</div>
+                  <div className="mt-1 text-xs leading-5 text-gray-500">
+                    系统会根据标题段落拆出可操作模块。你可以只挑一个版本送去 Publisher，而不是整包一起发。
+                  </div>
+                </div>
+                <div className="rounded-2xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs font-semibold text-gray-700">
+                  {contentBlocks.length} 个可操作片段
+                </div>
+              </div>
+
+              {contentBlocks.length === 0 ? (
+                <div className="mt-4 rounded-2xl border border-dashed border-gray-200 bg-gray-50 px-4 py-8 text-center text-sm text-gray-500">
+                  先生成内容包。生成后会自动拆出短视频、社媒、newsletter 等独立片段。
+                </div>
+              ) : (
+                <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                  {contentBlocks.map((block) => (
+                    <div
+                      key={block.id}
+                      className="rounded-[24px] border border-gray-200 bg-[linear-gradient(135deg,#ffffff_0%,#f8fbff_100%)] p-4 shadow-sm"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="text-sm font-semibold text-gray-900">{block.label}</div>
+                          <div className="mt-1 text-xs text-gray-500">{block.summary}</div>
+                        </div>
+                        <div className="flex flex-wrap items-center justify-end gap-1">
+                          {block.suggestedPlatforms.map((platform) => (
+                            <span
+                              key={platform}
+                              className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700"
+                            >
+                              {platform}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="mt-4 max-h-44 overflow-auto whitespace-pre-wrap rounded-2xl bg-gray-50 px-3 py-3 text-[12px] leading-6 text-gray-700">
+                        {block.body}
+                      </div>
+
+                      <div className="mt-4 flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            void copyBlock(block);
+                          }}
+                          className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 transition-colors hover:bg-gray-50"
+                        >
+                          <Copy className="h-3.5 w-3.5" />
+                          复制片段
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => saveBlockDraft(block)}
+                          className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 transition-colors hover:bg-gray-50"
+                        >
+                          <FilePlus2 className="h-3.5 w-3.5" />
+                          存独立草稿
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => sendBlockToPublisher(block)}
+                          className="inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700 transition-colors hover:bg-emerald-100"
+                        >
+                          <Send className="h-3.5 w-3.5" />
+                          送去 Publisher
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </main>
+          </div>
         </div>
       </div>
     </AppWindowShell>

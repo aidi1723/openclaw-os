@@ -1,3 +1,5 @@
+import type { SupportWorkflowMeta } from "@/lib/support-workflow";
+
 export type InboxSource = "newsletter" | "client" | "internal";
 
 export type InboxItem = {
@@ -7,7 +9,7 @@ export type InboxItem = {
   body: string;
   createdAt: number;
   updatedAt: number;
-};
+} & SupportWorkflowMeta;
 
 export type InboxDigest = {
   id: string;
@@ -79,19 +81,44 @@ export function createInboxItem(input: {
   source: InboxSource;
   title: string;
   body: string;
-}) {
+} & SupportWorkflowMeta) {
   const now = Date.now();
   const item: InboxItem = {
     id: `${now}-${Math.random().toString(16).slice(2)}`,
     source: input.source,
     title: input.title.trim() || "未命名邮件",
     body: input.body,
+    workflowRunId: input.workflowRunId,
+    workflowScenarioId: input.workflowScenarioId,
+    workflowStageId: input.workflowStageId,
+    workflowSource: input.workflowSource?.trim() || undefined,
+    workflowNextStep: input.workflowNextStep?.trim() || undefined,
+    workflowTriggerType: input.workflowTriggerType,
     createdAt: now,
     updatedAt: now,
   };
   saveItems([item, ...loadItems()]);
   emit();
   return item.id;
+}
+
+export function updateInboxItem(
+  itemId: string,
+  patch: Partial<Omit<InboxItem, "id" | "createdAt" | "updatedAt">>,
+) {
+  const now = Date.now();
+  saveItems(
+    loadItems().map((item) =>
+      item.id === itemId
+        ? {
+            ...item,
+            ...patch,
+            updatedAt: now,
+          }
+        : item,
+    ),
+  );
+  emit();
 }
 
 export function removeInboxItem(itemId: string) {

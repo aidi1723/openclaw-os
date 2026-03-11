@@ -1,3 +1,5 @@
+import type { CreatorWorkflowMeta } from "@/lib/creator-workflow";
+
 export type CreatorRadarRecord = {
   id: string;
   title: string;
@@ -8,7 +10,7 @@ export type CreatorRadarRecord = {
   digest: string;
   createdAt: number;
   updatedAt: number;
-};
+} & CreatorWorkflowMeta;
 
 type Listener = () => void;
 
@@ -59,6 +61,12 @@ export function createCreatorRadarItem(
     goal: input?.goal ?? "",
     notes: input?.notes ?? "",
     digest: input?.digest ?? "",
+    workflowRunId: input?.workflowRunId,
+    workflowScenarioId: input?.workflowScenarioId,
+    workflowStageId: input?.workflowStageId,
+    workflowSource: input?.workflowSource?.trim() || undefined,
+    workflowNextStep: input?.workflowNextStep?.trim() || undefined,
+    workflowTriggerType: input?.workflowTriggerType,
     createdAt: now,
     updatedAt: now,
   };

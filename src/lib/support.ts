@@ -1,3 +1,5 @@
+import type { SupportWorkflowMeta } from "@/lib/support-workflow";
+
 export type SupportChannel = "email" | "whatsapp" | "instagram" | "reviews";
 export type SupportStatus = "new" | "waiting" | "resolved";
 
@@ -11,7 +13,7 @@ export type SupportTicket = {
   replyDraft: string;
   createdAt: number;
   updatedAt: number;
-};
+} & SupportWorkflowMeta;
 
 type Listener = () => void;
 
@@ -60,6 +62,12 @@ export function createSupportTicket(input?: Partial<Omit<SupportTicket, "id" | "
     message: input?.message ?? "",
     status: input?.status ?? "new",
     replyDraft: input?.replyDraft ?? "",
+    workflowRunId: input?.workflowRunId,
+    workflowScenarioId: input?.workflowScenarioId,
+    workflowStageId: input?.workflowStageId,
+    workflowSource: input?.workflowSource?.trim() || undefined,
+    workflowNextStep: input?.workflowNextStep?.trim() || undefined,
+    workflowTriggerType: input?.workflowTriggerType,
     createdAt: now,
     updatedAt: now,
   };

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { MailPlus, Plus, Sparkles, Trash2, Users } from "lucide-react";
 import type { AppWindowProps } from "@/apps/types";
 import { AppToast } from "@/components/AppToast";
+import { SalesHeroWorkflowPanel } from "@/components/workflows/SalesHeroWorkflowPanel";
 import { AppWindowShell } from "@/components/windows/AppWindowShell";
 import { useTimedToast } from "@/hooks/useTimedToast";
 import {
@@ -18,8 +19,10 @@ import {
 import { createDraft } from "@/lib/drafts";
 import { getOutputLanguageInstruction } from "@/lib/language";
 import { requestOpenClawAgent } from "@/lib/openclaw-agent-client";
+import { upsertSalesAsset } from "@/lib/sales-assets";
 import { createTask, updateTask } from "@/lib/tasks";
 import type { PersonalCrmPrefill } from "@/lib/ui-events";
+import { completeWorkflowRun } from "@/lib/workflow-runs";
 
 const statusOptions: Array<{ value: ContactStatus; label: string }> = [
   { value: "lead", label: "线索" },
@@ -91,12 +94,31 @@ export function PersonalCRMAppWindow({
         lastTouch: detail?.lastTouch ?? "",
         nextStep: detail?.nextStep ?? "",
         notes: detail?.notes ?? "",
+        workflowRunId: detail?.workflowRunId,
+        workflowScenarioId: detail?.workflowScenarioId,
+        workflowStageId: detail?.workflowStageId,
+        workflowSource: detail?.workflowSource,
+        workflowNextStep: detail?.workflowNextStep,
+        workflowTriggerType: detail?.workflowTriggerType,
       });
       setSelectedId(id);
       showToast("已带入 CRM 上下文", "ok");
     };
     window.addEventListener("openclaw:crm-prefill", onPrefill);
     return () => window.removeEventListener("openclaw:crm-prefill", onPrefill);
+  }, [showToast]);
+
+  useEffect(() => {
+    const onSelect = (event: Event) => {
+      const contactId = (event as CustomEvent<{ contactId?: string }>).detail?.contactId;
+      if (!contactId) return;
+      const targetContact = getContacts().find((contact) => contact.id === contactId);
+      if (!targetContact) return;
+      setSelectedId(targetContact.id);
+      showToast("已定位到 CRM 记录", "ok");
+    };
+    window.addEventListener("openclaw:crm-select", onSelect);
+    return () => window.removeEventListener("openclaw:crm-select", onSelect);
   }, [showToast]);
 
   const selected = useMemo(
@@ -164,6 +186,21 @@ export function PersonalCRMAppWindow({
         sessionId: "webos-personal-crm",
         timeoutSeconds: 90,
       });
+      if (selected.workflowRunId) {
+        upsertSalesAsset(selected.workflowRunId, {
+          scenarioId: "sales-pipeline",
+          contactId: selected.id,
+          company: selected.company,
+          contactName: selected.name,
+          preferredLanguage: selected.notes.includes("Arabic") ? "English + Arabic summary" : "",
+          requirementSummary: selected.nextStep,
+          preferenceNotes: selected.notes,
+          objectionNotes: text || fallback,
+          nextAction: "根据 CRM 建议安排下一次联系，并确认是否完成这一轮销售流程。",
+          quoteStatus: "crm_logged",
+          status: "crm_syncing",
+        });
+      }
       setSuggestion(text || fallback);
       updateTask(taskId, { status: "done" });
       showToast("触达建议已生成", "ok");
@@ -200,8 +237,39 @@ export function PersonalCRMAppWindow({
       body: suggestion,
       tags: ["crm", selected.status],
       source: "import",
+      workflowSource: selected.workflowSource,
+      workflowNextStep: selected.workflowNextStep,
     });
     showToast("已保存到草稿", "ok");
+  };
+
+  const completeSalesWorkflow = () => {
+    if (!selected) {
+      showToast("请先选择联系人", "error");
+      return;
+    }
+    patchSelected({
+      workflowSource: "Personal CRM 已完成本轮客户推进记录",
+      workflowNextStep: "本轮流程已完成，可复用沉淀的话术、偏好和推进规则。",
+      workflowStageId: selected.workflowRunId ? "assetize" : selected.workflowStageId,
+    });
+    if (selected.workflowRunId) {
+      upsertSalesAsset(selected.workflowRunId, {
+        scenarioId: "sales-pipeline",
+        contactId: selected.id,
+        company: selected.company,
+        contactName: selected.name,
+        requirementSummary: selected.nextStep,
+        preferenceNotes: selected.notes,
+        objectionNotes: suggestion,
+        nextAction: "当前轮次已完成，下一次可按客户反馈重新启动跟进。",
+        latestDraftBody: suggestion,
+        quoteStatus: "completed",
+        status: "completed",
+      });
+      completeWorkflowRun(selected.workflowRunId);
+    }
+    showToast("已完成销售 Hero Workflow", "ok");
   };
 
   return (
@@ -239,7 +307,30 @@ export function PersonalCRMAppWindow({
           </div>
         </div>
 
-        <div className="grid grid-cols-1 gap-4 p-4 sm:p-6 xl:grid-cols-[320px_minmax(0,1fr)]">
+        <div className="space-y-4 p-4 sm:p-6">
+          <SalesHeroWorkflowPanel
+            workflowRunId={selected?.workflowRunId}
+            title={selected ? `${selected.name || "未命名联系人"} · CRM 收口阶段` : "Personal CRM · Hero Workflow"}
+            description="CRM 不只是联系人列表，它是销售 Hero Workflow 的资产落点，用来保留偏好、节奏和下一步规则。"
+            emptyHint="当联系人是从销售链路同步过来时，这里会显示运行状态和已经沉淀的销售资产。"
+            source={selected?.workflowSource}
+            nextStep={selected?.workflowNextStep}
+            actions={[
+              {
+                label: "生成跟进建议",
+                onClick: generateOutreach,
+                disabled: isGenerating || !selected,
+              },
+              {
+                label: "完成本轮流程",
+                onClick: completeSalesWorkflow,
+                disabled: !selected,
+                tone: "secondary",
+              },
+            ]}
+          />
+
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-[320px_minmax(0,1fr)]">
           <aside className="space-y-4">
             <div className="rounded-2xl border border-gray-200 bg-white p-5">
               <div className="flex items-center justify-between gap-2">
@@ -450,6 +541,7 @@ export function PersonalCRMAppWindow({
               </div>
             </div>
           </main>
+          </div>
         </div>
       </div>
     </AppWindowShell>

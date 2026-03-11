@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>Label</key>
+    <string>com.openclaw.publish-queue-worker</string>
+
+    <key>WorkingDirectory</key>
+    <string>__OPENCLAW_APP_DIR__</string>
+
+    <key>ProgramArguments</key>
+    <array>
+      <string>/usr/bin/env</string>
+      <string>npm</string>
+      <string>run</string>
+      <string>publish-queue:worker</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+      <key>NODE_ENV</key>
+      <string>production</string>
+      <key>OPENCLAW_APP_URL</key>
+      <string>__OPENCLAW_APP_URL__</string>
+      <key>OPENCLAW_QUEUE_INTERVAL_MS</key>
+      <string>3000</string>
+      <key>OPENCLAW_QUEUE_SECRET</key>
+      <string>__OPENCLAW_QUEUE_SECRET__</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>__OPENCLAW_LOG_DIR__/openclaw-publish-queue-worker.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>__OPENCLAW_LOG_DIR__/openclaw-publish-queue-worker.error.log</string>
+  </dict>
+</plist>

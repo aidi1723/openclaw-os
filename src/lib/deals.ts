@@ -1,9 +1,14 @@
 export type DealStage = "new" | "qualified" | "proposal" | "blocked" | "won";
 
+import type { SalesWorkflowMeta } from "@/lib/sales-workflow";
+
 export type DealRecord = {
   id: string;
   company: string;
   contact: string;
+  inquiryChannel: string;
+  preferredLanguage: string;
+  productLine: string;
   need: string;
   budget: string;
   timing: string;
@@ -12,7 +17,7 @@ export type DealRecord = {
   brief: string;
   createdAt: number;
   updatedAt: number;
-};
+} & SalesWorkflowMeta;
 
 type Listener = () => void;
 
@@ -57,12 +62,21 @@ export function createDeal(input?: Partial<Omit<DealRecord, "id" | "createdAt" |
     id: `${now}-${Math.random().toString(16).slice(2)}`,
     company: input?.company?.trim() || "新线索",
     contact: input?.contact ?? "",
+    inquiryChannel: input?.inquiryChannel ?? "",
+    preferredLanguage: input?.preferredLanguage ?? "",
+    productLine: input?.productLine ?? "",
     need: input?.need ?? "",
     budget: input?.budget ?? "",
     timing: input?.timing ?? "",
     stage: input?.stage ?? "new",
     notes: input?.notes ?? "",
     brief: input?.brief ?? "",
+    workflowRunId: input?.workflowRunId,
+    workflowScenarioId: input?.workflowScenarioId,
+    workflowStageId: input?.workflowStageId,
+    workflowSource: input?.workflowSource?.trim() || undefined,
+    workflowNextStep: input?.workflowNextStep?.trim() || undefined,
+    workflowTriggerType: input?.workflowTriggerType,
     createdAt: now,
     updatedAt: now,
   };

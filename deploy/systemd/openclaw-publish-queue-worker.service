@@ -1,0 +1,17 @@
+[Unit]
+Description=OpenClaw publish queue worker
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=__OPENCLAW_APP_DIR__
+Environment=NODE_ENV=production
+Environment=OPENCLAW_APP_URL=__OPENCLAW_APP_URL__
+Environment=OPENCLAW_QUEUE_INTERVAL_MS=3000
+Environment=OPENCLAW_QUEUE_SECRET=__OPENCLAW_QUEUE_SECRET__
+ExecStart=/usr/bin/env npm run publish-queue:worker
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

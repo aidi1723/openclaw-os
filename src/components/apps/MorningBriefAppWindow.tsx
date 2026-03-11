@@ -4,13 +4,17 @@ import { useEffect, useMemo, useState } from "react";
 import { Newspaper, PenSquare, Sparkles, SquarePen } from "lucide-react";
 import type { AppWindowProps } from "@/apps/types";
 import { AppToast } from "@/components/AppToast";
+import { ResearchHeroWorkflowPanel } from "@/components/workflows/ResearchHeroWorkflowPanel";
 import { AppWindowShell } from "@/components/windows/AppWindowShell";
 import { useTimedToast } from "@/hooks/useTimedToast";
 import { getBriefs, createBrief, subscribeBriefs, type BriefRecord } from "@/lib/briefs";
 import { getDrafts, subscribeDrafts } from "@/lib/drafts";
 import { getOutputLanguageInstruction } from "@/lib/language";
 import { requestOpenClawAgent } from "@/lib/openclaw-agent-client";
+import { upsertResearchAsset } from "@/lib/research-assets";
 import { getTasks, subscribeTasks, createTask, updateTask } from "@/lib/tasks";
+import type { WorkflowTriggerType } from "@/lib/workflow-runs";
+import { completeWorkflowRun } from "@/lib/workflow-runs";
 import { requestOpenApp, type MorningBriefPrefill } from "@/lib/ui-events";
 
 function buildLocalBrief(input: {
@@ -63,7 +67,25 @@ export function MorningBriefAppWindow({
   const [briefs, setBriefs] = useState<BriefRecord[]>([]);
   const [taskCount, setTaskCount] = useState(0);
   const [draftCount, setDraftCount] = useState(0);
+  const [workflowRunId, setWorkflowRunId] = useState<string | undefined>();
+  const [workflowScenarioId, setWorkflowScenarioId] = useState<string | undefined>();
+  const [workflowStageId, setWorkflowStageId] = useState<string | undefined>();
+  const [workflowSource, setWorkflowSource] = useState("");
+  const [workflowNextStep, setWorkflowNextStep] = useState("");
+  const [workflowTriggerType, setWorkflowTriggerType] = useState<WorkflowTriggerType | undefined>();
   const { toast, showToast } = useTimedToast(2000);
+
+  function applyBriefRecord(item: BriefRecord) {
+    setFocus(item.focus);
+    setNotes(item.notes);
+    setBrief(item.content);
+    setWorkflowRunId(item.workflowRunId);
+    setWorkflowScenarioId(item.workflowScenarioId);
+    setWorkflowStageId(item.workflowStageId);
+    setWorkflowSource(item.workflowSource ?? "");
+    setWorkflowNextStep(item.workflowNextStep ?? "");
+    setWorkflowTriggerType(item.workflowTriggerType);
+  }
 
   useEffect(() => {
     if (!isVisible) return;
@@ -93,11 +115,31 @@ export function MorningBriefAppWindow({
       if (detail?.notes) {
         setNotes((current) => (current ? `${current}\n\n${detail.notes}` : detail.notes || ""));
       }
+      setWorkflowRunId(detail?.workflowRunId);
+      setWorkflowScenarioId(detail?.workflowScenarioId);
+      setWorkflowStageId(detail?.workflowStageId);
+      setWorkflowSource(detail?.workflowSource ?? "");
+      setWorkflowNextStep(detail?.workflowNextStep ?? "");
+      setWorkflowTriggerType(detail?.workflowTriggerType);
       showToast("已带入晨报上下文", "ok");
     };
     window.addEventListener("openclaw:morning-brief-prefill", onPrefill);
     return () =>
       window.removeEventListener("openclaw:morning-brief-prefill", onPrefill);
+  }, [showToast]);
+
+  useEffect(() => {
+    const onSelect = (event: Event) => {
+      const briefId = (event as CustomEvent<{ briefId?: string }>).detail?.briefId;
+      if (!briefId) return;
+      const targetBrief = getBriefs().find((item) => item.id === briefId);
+      if (!targetBrief) return;
+      applyBriefRecord(targetBrief);
+      showToast("已恢复该次晨报", "ok");
+    };
+    window.addEventListener("openclaw:morning-brief-select", onSelect);
+    return () =>
+      window.removeEventListener("openclaw:morning-brief-select", onSelect);
   }, [showToast]);
 
   const latestBriefAt = briefs[0]?.createdAt ?? null;
@@ -140,14 +182,49 @@ export function MorningBriefAppWindow({
         sessionId: "webos-morning-brief",
         timeoutSeconds: 90,
       });
-      setBrief(text || fallback);
-      createBrief({ focus, notes, content: text || fallback });
+      const nextBrief = text || fallback;
+      setBrief(nextBrief);
+      const briefId = createBrief({
+        focus,
+        notes,
+        content: nextBrief,
+        workflowRunId,
+        workflowScenarioId,
+        workflowStageId,
+        workflowSource,
+        workflowNextStep,
+        workflowTriggerType,
+      });
+      if (workflowRunId) {
+        setWorkflowStageId("assetize");
+        setWorkflowSource("Morning Brief 已完成研究洞察摘要");
+        setWorkflowNextStep("本轮研究链已完成，可把分析框架、观察维度和分发模板继续复用。");
+        upsertResearchAsset(workflowRunId, {
+          scenarioId: workflowScenarioId ?? "research-radar",
+          briefId,
+          topic: focus,
+          latestBrief: nextBrief,
+          nextAction: "本轮研究摘要已完成，可以继续复用沉淀下来的框架。",
+          status: "completed",
+        });
+        completeWorkflowRun(workflowRunId);
+      }
       updateTask(taskId, { status: "done" });
       showToast("晨报已生成", "ok");
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "生成失败";
       setBrief(fallback);
-      createBrief({ focus, notes, content: fallback });
+      createBrief({
+        focus,
+        notes,
+        content: fallback,
+        workflowRunId,
+        workflowScenarioId,
+        workflowStageId,
+        workflowSource,
+        workflowNextStep,
+        workflowTriggerType,
+      });
       updateTask(taskId, { status: "error", detail: errorMessage });
       showToast("OpenClaw 不可用，已切换本地晨报", "error");
     } finally {
@@ -221,7 +298,26 @@ export function MorningBriefAppWindow({
           </div>
         </div>
 
-        <div className="grid grid-cols-1 gap-4 p-4 sm:p-6 xl:grid-cols-[360px_minmax(0,1fr)]">
+        <div className="space-y-4 p-4 sm:p-6">
+          {workflowRunId || workflowScenarioId === "research-radar" ? (
+            <ResearchHeroWorkflowPanel
+              workflowRunId={workflowRunId}
+              title={focus ? `${focus} · 研究摘要与收口阶段` : "Morning Brief · Research Workflow"}
+              description="Morning Brief 在研究链里负责把研究结论压成今天真正可执行的判断和动作，让洞察不再停留在长文报告里。"
+              emptyHint="当晨报是从 Deep Research Hub 送过来时，这里会显示所属 Research Hero Workflow。"
+              source={workflowSource}
+              nextStep={workflowNextStep}
+              actions={[
+                {
+                  label: "生成晨报",
+                  onClick: generateBrief,
+                  disabled: isGenerating,
+                },
+              ]}
+            />
+          ) : null}
+
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-[360px_minmax(0,1fr)]">
           <aside className="space-y-4">
             <div className="rounded-2xl border border-gray-200 bg-white p-5">
               <div className="flex items-center gap-2 text-sm font-semibold text-gray-900">
@@ -274,11 +370,7 @@ export function MorningBriefAppWindow({
                     <button
                       key={item.id}
                       type="button"
-                      onClick={() => {
-                        setFocus(item.focus);
-                        setNotes(item.notes);
-                        setBrief(item.content);
-                      }}
+                      onClick={() => applyBriefRecord(item)}
                       className="w-full rounded-2xl border border-gray-200 bg-gray-50 p-3 text-left transition-colors hover:bg-gray-100"
                     >
                       <div className="text-xs font-semibold text-gray-900">
@@ -328,6 +420,7 @@ export function MorningBriefAppWindow({
               )}
             </div>
           </main>
+          </div>
         </div>
       </div>
     </AppWindowShell>

@@ -14,6 +14,12 @@ import { AppToast } from "@/components/AppToast";
 import { AppWindowShell } from "@/components/windows/AppWindowShell";
 import { useTimedToast } from "@/hooks/useTimedToast";
 import {
+  getPublishConfig,
+  refreshPublishConfig,
+  savePublishConfig,
+  subscribePublishConfig,
+} from "@/lib/publish-config";
+import {
   appCatalog,
   getAppDisplayName,
   getCategoryLabel,
@@ -109,7 +115,18 @@ export function SettingsAppWindow({
       setForm(loadSettings());
       setSavedAt(null);
       hydratedRef.current = true;
+      void refreshPublishConfig().then((matrixAccounts) => {
+        setForm((prev) => ({ ...prev, matrixAccounts }));
+      });
     }
+  }, [isWindowVisible]);
+
+  useEffect(() => {
+    if (!isWindowVisible) return;
+    const unsubscribe = subscribePublishConfig(() => {
+      setForm((prev) => ({ ...prev, matrixAccounts: getPublishConfig() }));
+    });
+    return () => unsubscribe();
   }, [isWindowVisible]);
 
   useEffect(() => {
@@ -338,13 +355,17 @@ export function SettingsAppWindow({
     }
   };
 
-  const handleSaveMatrix = (appId: MatrixApp) => {
+  const handleSaveMatrix = async (appId: MatrixApp) => {
     setMatrixSaving((prev) => ({ ...prev, [appId]: true }));
-    // Auto-save already happens, this is a UX "commit" action.
-    window.setTimeout(() => {
+    try {
+      const matrixAccounts = await savePublishConfig(form.matrixAccounts);
+      setForm((prev) => ({ ...prev, matrixAccounts }));
+      showToast("授权信息已保存到服务端", "ok");
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "保存失败", "error");
+    } finally {
       setMatrixSaving((prev) => ({ ...prev, [appId]: false }));
-      showToast("授权信息已保存", "ok");
-    }, 350);
+    }
   };
 
   return (

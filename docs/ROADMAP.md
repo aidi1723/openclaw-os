@@ -4,6 +4,12 @@ This roadmap focuses on **v0.x** usability and open-source readiness.
 
 ## v0.2 (Planned)
 
+### Scenario-first product focus
+
+- Reduce “many apps” feeling and strengthen 3 real workflow lines
+- Make scenario packs executable, guided, and easier to complete
+- Prioritize automation usefulness over admin/auth hardening for now
+
 ### Desktop UX
 
 - Window resize (edges/corners) + size persistence
@@ -13,8 +19,15 @@ This roadmap focuses on **v0.x** usability and open-source readiness.
 ### Workflow system (solo / small teams)
 
 - Playbooks library: save/share SOPs (steps + links to apps + prompts)
+- Runnable scenario packs with stronger app prefills and next-step guidance
 - Draft templates/snippets and “repurpose” flows (long → short, video → carousel)
 - Lightweight “daily ops” dashboard (today list + inbox + quick actions)
+
+### Intelligent workflow assistance
+
+- Better cross-app handoff for content, research, and daily ops workflows
+- AI suggestions that recommend the next action, not only generate text
+- Reusable structured outputs and presets for the highest-value scenarios
 
 ### Publishing hub (BYO connectors)
 
@@ -29,10 +42,12 @@ This roadmap focuses on **v0.x** usability and open-source readiness.
 
 ## Near-term (unversioned)
 
+- Content workflow compounding: research/source -> repurpose -> publish
+- Runnable scenario packs with guided next actions
+- Better AI usefulness inside existing apps
+- Publish queue + retries + richer receipts UI
 - Better window management (resize, tiling, multi-monitor awareness)
 - Searchable app commands and recent history in Spotlight
-- Draft templates and reusable snippets
-- Publish queue + retries + richer receipts UI
 
 ## Long-term
 

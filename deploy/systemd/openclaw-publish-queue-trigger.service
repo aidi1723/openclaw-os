@@ -1,0 +1,9 @@
+[Unit]
+Description=Trigger OpenClaw publish queue once
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/curl -fsS -X POST \
+  -H "Authorization: Bearer __OPENCLAW_QUEUE_SECRET__" \
+  __OPENCLAW_APP_URL__/api/publish/queue/run

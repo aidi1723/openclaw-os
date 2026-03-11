@@ -1,3 +1,5 @@
+import type { WorkflowContextMeta } from "@/lib/workflow-context";
+
 export type DraftId = string;
 
 export type DraftSource =
@@ -11,9 +13,11 @@ export type DraftRecord = {
   body: string;
   tags?: string[];
   source: DraftSource;
+  workflowSource?: string;
+  workflowNextStep?: string;
   createdAt: number;
   updatedAt: number;
-};
+} & WorkflowContextMeta;
 
 type Listener = () => void;
 
@@ -62,6 +66,12 @@ export function createDraft(input: {
   body: string;
   tags?: string[];
   source?: DraftSource;
+  workflowRunId?: string;
+  workflowScenarioId?: string;
+  workflowStageId?: string;
+  workflowSource?: string;
+  workflowNextStep?: string;
+  workflowTriggerType?: import("@/lib/workflow-runs").WorkflowTriggerType;
 }) {
   const now = Date.now();
   const draft: DraftRecord = {
@@ -70,6 +80,12 @@ export function createDraft(input: {
     body: input.body,
     tags: input.tags,
     source: input.source ?? "publisher",
+    workflowRunId: input.workflowRunId,
+    workflowScenarioId: input.workflowScenarioId,
+    workflowStageId: input.workflowStageId,
+    workflowSource: input.workflowSource?.trim() || undefined,
+    workflowNextStep: input.workflowNextStep?.trim() || undefined,
+    workflowTriggerType: input.workflowTriggerType,
     createdAt: now,
     updatedAt: now,
   };
@@ -79,7 +95,23 @@ export function createDraft(input: {
   return draft.id;
 }
 
-export function updateDraft(draftId: DraftId, patch: Partial<Pick<DraftRecord, "title" | "body" | "tags">>) {
+export function updateDraft(
+  draftId: DraftId,
+  patch: Partial<
+    Pick<
+      DraftRecord,
+      | "title"
+      | "body"
+      | "tags"
+      | "workflowRunId"
+      | "workflowScenarioId"
+      | "workflowStageId"
+      | "workflowSource"
+      | "workflowNextStep"
+      | "workflowTriggerType"
+    >
+  >,
+) {
   const now = Date.now();
   const next = load().map((d) =>
     d.id === draftId ? { ...d, ...patch, updatedAt: now } : d,
@@ -93,4 +125,3 @@ export function removeDraft(draftId: DraftId) {
   save(next);
   emit();
 }
-

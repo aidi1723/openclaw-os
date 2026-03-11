@@ -1,5 +1,7 @@
 export type EmailTone = "professional" | "warm" | "direct";
 
+import type { SalesWorkflowMeta } from "@/lib/sales-workflow";
+
 export type EmailThread = {
   id: string;
   subject: string;
@@ -10,7 +12,7 @@ export type EmailThread = {
   draft: string;
   createdAt: number;
   updatedAt: number;
-};
+} & SalesWorkflowMeta;
 
 type Listener = () => void;
 
@@ -59,6 +61,12 @@ export function createEmailThread(input?: Partial<Omit<EmailThread, "id" | "crea
     goal: input?.goal ?? "",
     tone: input?.tone ?? "professional",
     draft: input?.draft ?? "",
+    workflowRunId: input?.workflowRunId,
+    workflowScenarioId: input?.workflowScenarioId,
+    workflowStageId: input?.workflowStageId,
+    workflowSource: input?.workflowSource?.trim() || undefined,
+    workflowNextStep: input?.workflowNextStep?.trim() || undefined,
+    workflowTriggerType: input?.workflowTriggerType,
     createdAt: now,
     updatedAt: now,
   };

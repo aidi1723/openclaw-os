@@ -4,11 +4,14 @@ import { useEffect, useMemo, useState } from "react";
 import { Compass, FilePlus2, Plus, Sparkles, Trash2 } from "lucide-react";
 import type { AppWindowProps } from "@/apps/types";
 import { AppToast } from "@/components/AppToast";
+import { CreatorHeroWorkflowPanel } from "@/components/workflows/CreatorHeroWorkflowPanel";
 import { AppWindowShell } from "@/components/windows/AppWindowShell";
 import { useTimedToast } from "@/hooks/useTimedToast";
 import { createDraft } from "@/lib/drafts";
 import { getOutputLanguageInstruction } from "@/lib/language";
 import { requestOpenClawAgent } from "@/lib/openclaw-agent-client";
+import { upsertCreatorAsset } from "@/lib/creator-assets";
+import { buildCreatorWorkflowMeta, getCreatorWorkflowScenario } from "@/lib/creator-workflow";
 import { createTask, updateTask } from "@/lib/tasks";
 import {
   createCreatorRadarItem,
@@ -23,6 +26,12 @@ import {
   requestOpenKnowledgeVault,
   type CreatorRadarPrefill,
 } from "@/lib/ui-events";
+import {
+  advanceWorkflowRun,
+  getWorkflowRun,
+  startWorkflowRun,
+  type WorkflowTriggerType,
+} from "@/lib/workflow-runs";
 
 function buildLocalDigest(item: CreatorRadarRecord) {
   return [
@@ -41,6 +50,18 @@ function buildLocalDigest(item: CreatorRadarRecord) {
     "- 把最值得做的一条内容送进 Content Repurposer。",
     "- 把重复出现的 hook、结构和 FAQ 沉淀到 Knowledge Vault。",
   ].join("\n");
+}
+
+function getDefaultTriggerType(item: CreatorRadarRecord): WorkflowTriggerType {
+  return item.workflowTriggerType ?? "manual";
+}
+
+function extractPrimaryAngle(digest: string, fallback: string) {
+  const line = digest
+    .split(/\r?\n/)
+    .map((item) => item.replace(/^[\-*#【】\s]+/g, "").trim())
+    .find(Boolean);
+  return line || fallback;
 }
 
 export function CreatorRadarAppWindow({
@@ -84,6 +105,7 @@ export function CreatorRadarAppWindow({
         goal: detail?.goal ?? "",
         notes: detail?.notes ?? "",
         digest: detail?.digest ?? "",
+        ...buildCreatorWorkflowMeta(detail),
       });
       setSelectedId(id);
       showToast("已带入 creator radar 上下文", "ok");
@@ -91,6 +113,20 @@ export function CreatorRadarAppWindow({
     window.addEventListener("openclaw:creator-radar-prefill", onPrefill);
     return () =>
       window.removeEventListener("openclaw:creator-radar-prefill", onPrefill);
+  }, [showToast]);
+
+  useEffect(() => {
+    const onSelect = (event: Event) => {
+      const radarItemId = (event as CustomEvent<{ radarItemId?: string }>).detail?.radarItemId;
+      if (!radarItemId) return;
+      const targetItem = getCreatorRadarItems().find((item) => item.id === radarItemId);
+      if (!targetItem) return;
+      setSelectedId(targetItem.id);
+      showToast("已定位到内容雷达条目", "ok");
+    };
+    window.addEventListener("openclaw:creator-radar-select", onSelect);
+    return () =>
+      window.removeEventListener("openclaw:creator-radar-select", onSelect);
   }, [showToast]);
 
   const selected = useMemo(
@@ -118,11 +154,55 @@ export function CreatorRadarAppWindow({
     showToast("creator brief 已删除", "ok");
   };
 
+  const ensureWorkflowForSelected = (triggerType?: WorkflowTriggerType) => {
+    if (!selected) return null;
+    const resolvedTriggerType = triggerType ?? getDefaultTriggerType(selected);
+    if (selected.workflowRunId) return selected.workflowRunId;
+    const scenario = getCreatorWorkflowScenario();
+    if (!scenario) return null;
+    const runId = startWorkflowRun(scenario, resolvedTriggerType);
+    patchSelected({
+      workflowRunId: runId,
+      workflowScenarioId: scenario.id,
+      workflowStageId: scenario.workflowStages[0]?.id,
+      workflowTriggerType: resolvedTriggerType,
+      workflowSource: "来自 Creator Radar 的内容选题录入",
+      workflowNextStep: "先生成今日内容雷达摘要，再决定要不要拆成多平台内容包。",
+    });
+    upsertCreatorAsset(runId, {
+      scenarioId: scenario.id,
+      radarItemId: selected.id,
+      topic: selected.title,
+      audience: selected.audience,
+      sourceChannels: selected.channels,
+      primaryAngle: selected.title,
+      latestDigest: selected.digest,
+      nextAction: "先生成今日内容雷达摘要，确认今天最值得推进的一条内容。",
+      publishStatus: "not_started",
+      status: "radar",
+    });
+    return runId;
+  };
+
+  const startCreatorWorkflow = () => {
+    if (!selected) {
+      showToast("请先选择 brief", "error");
+      return;
+    }
+    const runId = ensureWorkflowForSelected("manual");
+    if (!runId) {
+      showToast("内容工作流模板不可用", "error");
+      return;
+    }
+    showToast("已启动 Creator Hero Workflow", "ok");
+  };
+
   const generateDigest = async () => {
     if (!selected) {
       showToast("请先选择 brief", "error");
       return;
     }
+    const runId = ensureWorkflowForSelected();
     const fallback = buildLocalDigest(selected);
     const taskId = createTask({
       name: "Assistant - Creator radar",
@@ -149,12 +229,42 @@ export function CreatorRadarAppWindow({
         sessionId: "webos-creator-radar",
         timeoutSeconds: 90,
       });
-      patchSelected({ digest: text || fallback });
+      const nextDigest = text || fallback;
+      const run = runId ? getWorkflowRun(runId) : null;
+      patchSelected({
+        digest: nextDigest,
+        workflowRunId: runId ?? selected.workflowRunId,
+        workflowScenarioId: selected.workflowScenarioId ?? "creator-studio",
+        workflowStageId: run?.currentStageId === "radar" ? "repurpose" : selected.workflowStageId,
+        workflowSource: "Creator Radar 已完成今日内容雷达",
+        workflowNextStep: "把这一条内容送进 Content Repurposer，生成多平台内容包。",
+      });
+      if (runId) {
+        upsertCreatorAsset(runId, {
+          scenarioId: "creator-studio",
+          radarItemId: selected.id,
+          topic: selected.title,
+          audience: selected.audience,
+          sourceChannels: selected.channels,
+          primaryAngle: extractPrimaryAngle(nextDigest, selected.title || "今日内容主线"),
+          latestDigest: nextDigest,
+          nextAction: "进入 Content Repurposer，把摘要拆成短视频、帖子和 newsletter 版本。",
+          publishStatus: "radar_ready",
+          status: "repurposing",
+        });
+        if (run?.currentStageId === "radar") {
+          advanceWorkflowRun(runId);
+        }
+      }
       updateTask(taskId, { status: "done" });
       showToast("内容雷达已生成", "ok");
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "生成失败";
-      patchSelected({ digest: fallback });
+      patchSelected({
+        digest: fallback,
+        workflowSource: "Creator Radar 本地兜底生成内容雷达",
+        workflowNextStep: "建议人工检查后，再送入 Content Repurposer。",
+      });
       updateTask(taskId, { status: "error", detail: errorMessage });
       showToast("OpenClaw 不可用，已切换本地摘要", "error");
     } finally {
@@ -172,6 +282,12 @@ export function CreatorRadarAppWindow({
       body: selected.digest,
       tags: ["creator-radar", "ideas"],
       source: "import",
+      workflowRunId: selected.workflowRunId,
+      workflowScenarioId: selected.workflowScenarioId,
+      workflowStageId: selected.workflowStageId,
+      workflowTriggerType: selected.workflowTriggerType,
+      workflowSource: selected.workflowSource,
+      workflowNextStep: selected.workflowNextStep,
     });
     showToast("已保存到草稿", "ok");
   };
@@ -181,12 +297,51 @@ export function CreatorRadarAppWindow({
       showToast("请先选择 brief", "error");
       return;
     }
+    const runId = ensureWorkflowForSelected();
+    const run = runId ? getWorkflowRun(runId) : null;
+    const nextStep = "在 Content Repurposer 里生成多平台内容包，再挑 1 个版本进入 Publisher。";
+    patchSelected({
+      workflowRunId: runId ?? selected.workflowRunId,
+      workflowScenarioId: selected.workflowScenarioId ?? "creator-studio",
+      workflowStageId: run?.currentStageId === "radar" ? "repurpose" : selected.workflowStageId ?? "repurpose",
+      workflowSource: "来自 Creator Radar 的已确认选题",
+      workflowNextStep: nextStep,
+    });
+    if (runId) {
+      if (run?.currentStageId === "radar") {
+        advanceWorkflowRun(runId);
+      }
+      upsertCreatorAsset(runId, {
+        scenarioId: "creator-studio",
+        radarItemId: selected.id,
+        topic: selected.title,
+        audience: selected.audience,
+        sourceChannels: selected.channels,
+        primaryAngle: extractPrimaryAngle(selected.digest, selected.title || "今日内容主线"),
+        latestDigest: selected.digest,
+        nextAction: nextStep,
+        publishStatus: "repurpose_pending",
+        status: "repurposing",
+      });
+    }
     requestOpenContentRepurposer({
       title: selected.title || "Repurpose Pack",
       sourceType: "youtube",
       audience: selected.audience,
       goal: selected.goal || "拆成多平台短内容",
-      sourceContent: [selected.digest, selected.notes].filter(Boolean).join("\n\n"),
+      sourceContent: [
+        `【主题】\n${selected.title || "未填写"}`,
+        selected.digest ? `【Creator Radar 摘要】\n${selected.digest}` : "",
+        selected.notes ? `【补充观察】\n${selected.notes}` : "",
+      ]
+        .filter(Boolean)
+        .join("\n\n"),
+      workflowSource: "来自 Creator Radar 的选题与内容雷达",
+      workflowNextStep: "先生成多平台内容包，再筛出 1 条最适合立即进入 Publisher 的版本。",
+      workflowRunId: runId ?? selected.workflowRunId,
+      workflowScenarioId: selected.workflowScenarioId ?? "creator-studio",
+      workflowStageId: run?.currentStageId === "radar" ? "repurpose" : selected.workflowStageId ?? "repurpose",
+      workflowTriggerType: selected.workflowTriggerType ?? "manual",
     });
     showToast("已发送到 Content Repurposer", "ok");
   };
@@ -232,7 +387,30 @@ export function CreatorRadarAppWindow({
           </div>
         </div>
 
-        <div className="grid grid-cols-1 gap-4 p-4 sm:p-6 xl:grid-cols-[320px_minmax(0,1fr)]">
+        <div className="space-y-4 p-4 sm:p-6">
+          <CreatorHeroWorkflowPanel
+            workflowRunId={selected?.workflowRunId}
+            title={selected ? `${selected.title || "未命名选题"} · 内容雷达阶段` : "Creator Radar · Hero Workflow"}
+            description="Creator Radar 不再只是选题列表，它负责启动内容增长链，把今天最值得做的一条内容推进到后续拆解和发布。"
+            emptyHint="当你从这里启动内容链后，Radar -> Repurposer -> Publisher 会共享同一个工作流运行状态。"
+            source={selected?.workflowSource}
+            nextStep={selected?.workflowNextStep}
+            actions={[
+              {
+                label: selected?.workflowRunId ? "已绑定内容链" : "按选题启动",
+                onClick: startCreatorWorkflow,
+                disabled: !selected || Boolean(selected?.workflowRunId),
+              },
+              {
+                label: "生成摘要",
+                onClick: generateDigest,
+                disabled: !selected || isGenerating,
+                tone: "secondary",
+              },
+            ]}
+          />
+
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-[320px_minmax(0,1fr)]">
           <aside className="space-y-4">
             <div className="rounded-2xl border border-gray-200 bg-white p-5">
               <div className="flex items-center justify-between gap-2">
@@ -391,6 +569,7 @@ export function CreatorRadarAppWindow({
               />
             </div>
           </main>
+          </div>
         </div>
       </div>
     </AppWindowShell>

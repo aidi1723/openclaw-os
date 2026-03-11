@@ -5,11 +5,14 @@ import { BookOpenText, FilePlus2, Plus, Sparkles, Trash2 } from "lucide-react";
 
 import type { AppWindowProps } from "@/apps/types";
 import { AppToast } from "@/components/AppToast";
+import { ResearchHeroWorkflowPanel } from "@/components/workflows/ResearchHeroWorkflowPanel";
 import { AppWindowShell } from "@/components/windows/AppWindowShell";
 import { useTimedToast } from "@/hooks/useTimedToast";
 import { createDraft } from "@/lib/drafts";
 import { getOutputLanguageInstruction } from "@/lib/language";
 import { requestOpenClawAgent } from "@/lib/openclaw-agent-client";
+import { upsertResearchAsset } from "@/lib/research-assets";
+import { buildResearchWorkflowMeta, getResearchWorkflowScenario } from "@/lib/research-workflow";
 import {
   createResearchReport,
   getResearchReports,
@@ -22,7 +25,14 @@ import { createTask, updateTask } from "@/lib/tasks";
 import {
   requestOpenKnowledgeVault,
   requestOpenMorningBrief,
+  type ResearchHubPrefill,
 } from "@/lib/ui-events";
+import {
+  advanceWorkflowRun,
+  getWorkflowRun,
+  startWorkflowRun,
+  type WorkflowTriggerType,
+} from "@/lib/workflow-runs";
 
 function buildLocalResearchReport(item: ResearchReportRecord) {
   return [
@@ -46,6 +56,10 @@ function buildLocalResearchReport(item: ResearchReportRecord) {
     "- 把今天必须关注的变化带入 Morning Brief。",
     "- 若需要继续深挖，补充新的来源和验证问题。",
   ].join("\n");
+}
+
+function getDefaultTriggerType(item: ResearchReportRecord): WorkflowTriggerType {
+  return item.workflowTriggerType ?? "web_form";
 }
 
 export function DeepResearchHubAppWindow({
@@ -79,6 +93,39 @@ export function DeepResearchHubAppWindow({
     };
   }, [isVisible]);
 
+  useEffect(() => {
+    const onPrefill = (event: Event) => {
+      const detail = (event as CustomEvent<ResearchHubPrefill>).detail;
+      const id = createResearchReport({
+        topic: detail?.topic ?? "",
+        sources: detail?.sources ?? "",
+        angle: detail?.angle ?? "",
+        audience: detail?.audience ?? "",
+        notes: detail?.notes ?? "",
+        report: detail?.report ?? "",
+        ...buildResearchWorkflowMeta(detail),
+      });
+      setSelectedId(id);
+      showToast("已带入研究场景上下文", "ok");
+    };
+    window.addEventListener("openclaw:research-hub-prefill", onPrefill);
+    return () => window.removeEventListener("openclaw:research-hub-prefill", onPrefill);
+  }, [showToast]);
+
+  useEffect(() => {
+    const onSelect = (event: Event) => {
+      const reportId = (event as CustomEvent<{ reportId?: string }>).detail?.reportId;
+      if (!reportId) return;
+      const targetReport = getResearchReports().find((item) => item.id === reportId);
+      if (!targetReport) return;
+      setSelectedId(targetReport.id);
+      showToast("已定位到研究条目", "ok");
+    };
+    window.addEventListener("openclaw:research-hub-select", onSelect);
+    return () =>
+      window.removeEventListener("openclaw:research-hub-select", onSelect);
+  }, [showToast]);
+
   const selected = useMemo(
     () => reports.find((item) => item.id === selectedId) ?? null,
     [reports, selectedId],
@@ -104,12 +151,42 @@ export function DeepResearchHubAppWindow({
     showToast("研究条目已删除", "ok");
   };
 
+  const ensureWorkflowForSelected = (triggerType?: WorkflowTriggerType) => {
+    if (!selected) return null;
+    const resolvedTriggerType = triggerType ?? getDefaultTriggerType(selected);
+    if (selected.workflowRunId) return selected.workflowRunId;
+    const scenario = getResearchWorkflowScenario();
+    if (!scenario) return null;
+    const runId = startWorkflowRun(scenario, resolvedTriggerType);
+    patchSelected({
+      workflowRunId: runId,
+      workflowScenarioId: scenario.id,
+      workflowStageId: scenario.workflowStages[0]?.id,
+      workflowTriggerType: resolvedTriggerType,
+      workflowSource: "来自 Deep Research Hub 的研究任务录入",
+      workflowNextStep: "先生成结构化研究简报，再决定哪些洞察要送进知识库和晨报。",
+    });
+    upsertResearchAsset(runId, {
+      scenarioId: scenario.id,
+      reportId: selected.id,
+      topic: selected.topic,
+      audience: selected.audience,
+      angle: selected.angle,
+      sources: selected.sources,
+      latestReport: selected.report,
+      nextAction: "先输出结构化研究简报，避免研究停留在原始资料层。",
+      status: "capture",
+    });
+    return runId;
+  };
+
   const generateReport = async () => {
     if (!selected) {
       showToast("请先选择研究条目", "error");
       return;
     }
 
+    const runId = ensureWorkflowForSelected();
     const fallback = buildLocalResearchReport(selected);
     const taskId = createTask({
       name: "Assistant - Deep research",
@@ -138,12 +215,41 @@ export function DeepResearchHubAppWindow({
         sessionId: "webos-deep-research-hub",
         timeoutSeconds: 120,
       });
-      patchSelected({ report: text || fallback });
+      const nextReport = text || fallback;
+      const run = runId ? getWorkflowRun(runId) : null;
+      patchSelected({
+        report: nextReport,
+        workflowRunId: runId ?? selected.workflowRunId,
+        workflowScenarioId: selected.workflowScenarioId ?? "research-radar",
+        workflowStageId: run?.currentStageId === "capture" ? "synthesize" : selected.workflowStageId,
+        workflowSource: "Deep Research Hub 已输出结构化研究简报",
+        workflowNextStep: "把研究洞察送进 Knowledge Vault 或 Morning Brief，形成可被决策使用的摘要。",
+      });
+      if (runId) {
+        upsertResearchAsset(runId, {
+          scenarioId: "research-radar",
+          reportId: selected.id,
+          topic: selected.topic,
+          audience: selected.audience,
+          angle: selected.angle,
+          sources: selected.sources,
+          latestReport: nextReport,
+          nextAction: "把研究结论路由到知识库或晨报，而不是停留在 research hub 里。",
+          status: "synthesizing",
+        });
+        if (run?.currentStageId === "capture") {
+          advanceWorkflowRun(runId);
+        }
+      }
       updateTask(taskId, { status: "done" });
       showToast("研究简报已生成", "ok");
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "生成失败";
-      patchSelected({ report: fallback });
+      patchSelected({
+        report: fallback,
+        workflowSource: "Deep Research Hub 本地兜底生成研究简报",
+        workflowNextStep: "建议人工检查后，再送入知识库或晨报。",
+      });
       updateTask(taskId, { status: "error", detail: errorMessage });
       showToast("OpenClaw 不可用，已切换本地研究简报", "error");
     } finally {
@@ -161,6 +267,12 @@ export function DeepResearchHubAppWindow({
       body: selected.report,
       tags: ["research", "brief"],
       source: "import",
+      workflowRunId: selected.workflowRunId,
+      workflowScenarioId: selected.workflowScenarioId,
+      workflowStageId: selected.workflowStageId,
+      workflowTriggerType: selected.workflowTriggerType,
+      workflowSource: selected.workflowSource,
+      workflowNextStep: selected.workflowNextStep,
     });
     showToast("已保存到草稿", "ok");
   };
@@ -169,6 +281,33 @@ export function DeepResearchHubAppWindow({
     if (!selected?.report.trim()) {
       showToast("请先生成研究简报", "error");
       return;
+    }
+    const runId = ensureWorkflowForSelected();
+    const run = runId ? getWorkflowRun(runId) : null;
+    const nextStep = "把沉淀下来的研究洞察压成 Morning Brief 或任务指令，避免只存不用。";
+    patchSelected({
+      workflowRunId: runId ?? selected.workflowRunId,
+      workflowScenarioId: selected.workflowScenarioId ?? "research-radar",
+      workflowStageId: run?.currentStageId === "synthesize" ? "route" : selected.workflowStageId ?? "route",
+      workflowSource: "Deep Research Hub 已把洞察送往 Knowledge Vault",
+      workflowNextStep: nextStep,
+    });
+    if (runId) {
+      if (run?.currentStageId === "synthesize") {
+        advanceWorkflowRun(runId);
+      }
+      upsertResearchAsset(runId, {
+        scenarioId: "research-radar",
+        reportId: selected.id,
+        topic: selected.topic,
+        audience: selected.audience,
+        angle: selected.angle,
+        sources: selected.sources,
+        latestReport: selected.report,
+        vaultQuery: `请基于以下研究简报，整理长期可复用的观察维度、资料清单和后续跟踪框架：\n${selected.report}`,
+        nextAction: nextStep,
+        status: "routing",
+      });
     }
     requestOpenKnowledgeVault({
       query: `请基于以下研究简报，整理长期可复用的观察维度、资料清单和后续跟踪框架：\n${selected.report}`,
@@ -181,9 +320,41 @@ export function DeepResearchHubAppWindow({
       showToast("请先生成研究简报", "error");
       return;
     }
+    const runId = ensureWorkflowForSelected();
+    const run = runId ? getWorkflowRun(runId) : null;
+    const nextStep = "在 Morning Brief 里把研究结论压成今天可执行的判断与动作。";
+    patchSelected({
+      workflowRunId: runId ?? selected.workflowRunId,
+      workflowScenarioId: selected.workflowScenarioId ?? "research-radar",
+      workflowStageId: run?.currentStageId === "synthesize" ? "route" : selected.workflowStageId ?? "route",
+      workflowSource: "Deep Research Hub 已准备把研究结论送进 Morning Brief",
+      workflowNextStep: nextStep,
+    });
+    if (runId) {
+      if (run?.currentStageId === "synthesize") {
+        advanceWorkflowRun(runId);
+      }
+      upsertResearchAsset(runId, {
+        scenarioId: "research-radar",
+        reportId: selected.id,
+        topic: selected.topic,
+        audience: selected.audience,
+        angle: selected.angle,
+        sources: selected.sources,
+        latestReport: selected.report,
+        nextAction: nextStep,
+        status: "routing",
+      });
+    }
     requestOpenMorningBrief({
       focus: selected.topic || "研究主题",
       notes: selected.report,
+      workflowRunId: runId ?? selected.workflowRunId,
+      workflowScenarioId: selected.workflowScenarioId ?? "research-radar",
+      workflowStageId: run?.currentStageId === "synthesize" ? "route" : selected.workflowStageId ?? "route",
+      workflowTriggerType: selected.workflowTriggerType ?? "web_form",
+      workflowSource: "来自 Deep Research Hub 的研究结论",
+      workflowNextStep: "把研究洞察压成今天可执行的摘要，并完成本轮研究资产沉淀。",
     });
     showToast("已发送到 Morning Brief", "ok");
   };
@@ -218,7 +389,30 @@ export function DeepResearchHubAppWindow({
           </div>
         </div>
 
-        <div className="grid grid-cols-1 gap-4 p-4 sm:p-6 xl:grid-cols-[320px_minmax(0,1fr)]">
+        <div className="space-y-4 p-4 sm:p-6">
+          <ResearchHeroWorkflowPanel
+            workflowRunId={selected?.workflowRunId}
+            title={selected ? `${selected.topic || "未命名研究"} · 研究输入阶段` : "Deep Research Hub · Hero Workflow"}
+            description="Deep Research Hub 负责把分散的资料、来源和研究问题先压成结构化研究简报，让后续知识沉淀和晨报分发有稳定输入。"
+            emptyHint="当你从这里启动研究链后，Deep Research -> Knowledge Vault -> Morning Brief 会共享同一条工作流状态。"
+            source={selected?.workflowSource}
+            nextStep={selected?.workflowNextStep}
+            actions={[
+              {
+                label: "生成研究简报",
+                onClick: generateReport,
+                disabled: !selected || isGenerating,
+              },
+              {
+                label: "发到晨报",
+                onClick: sendToBrief,
+                disabled: !selected || !selected?.report.trim(),
+                tone: "secondary",
+              },
+            ]}
+          />
+
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-[320px_minmax(0,1fr)]">
           <aside className="space-y-4">
             <div className="rounded-2xl border border-gray-200 bg-white p-5">
               <div className="flex items-center justify-between gap-2">
@@ -376,6 +570,7 @@ export function DeepResearchHubAppWindow({
               </div>
             )}
           </main>
+          </div>
         </div>
       </div>
     </AppWindowShell>

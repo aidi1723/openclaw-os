@@ -6,6 +6,12 @@ This project is a **desktop-style UI shell** plus a set of workflow primitives. 
 
 Open **方案库 / Solutions Hub** and install a pack. It will add a set of runnable SOPs into **SoloOps → 我的 Playbooks** (local-first).
 
+Current near-term priority is not adding more isolated apps. It is making these scenario lines feel operational:
+
+- one source topic can move through a content pipeline with less manual jumping
+- one scenario pack can guide the user step by step
+- AI output can directly support action, follow-up, and publishing decisions
+
 ## 1) Content pipeline (idea → publish → iterate)
 
 - Use **Workflow Playbooks** to follow a repeatable SOP
@@ -18,6 +24,12 @@ Open **方案库 / Solutions Hub** and install a pack. It will add a set of runn
 - 内容生产流水线（从选题到复盘）
 - Newsletter / 周报系统（收集 → 写作 → 分发）
 - 品牌素材与一致性（Brand Kit）
+
+### What needs to improve next
+
+- stronger handoff from source discovery to repurposing
+- better recommended next actions after content generation
+- easier capture of publish results and reusable winning patterns
 
 ## 2) Repurposing (one source → many formats)
 
@@ -46,6 +58,11 @@ Open **方案库 / Solutions Hub** and install a pack. It will add a set of runn
 - 产品/活动发布（从准备到上线）
 - 电商上新与促销（素材包 + 发布节奏）
 
+### What needs to improve next
+
+- scenario steps should prefill more app context automatically
+- launch packs should feel executable, not only descriptive
+
 ## 5) Storefront ops (lightweight)
 
 - Keep promo calendars, product notes, and creative assets organized
@@ -62,8 +79,18 @@ Open **方案库 / Solutions Hub** and install a pack. It will add a set of runn
 
 ## Notes on automation
 
-OpenClaw OS intentionally does **not** ship platform-bypass automation. For “auto publish”, use:
+AgentCore OS intentionally does **not** ship platform-bypass automation. For “auto publish”, use:
 
 - Official APIs, or
 - Approved tools (Make/Zapier/Buffer/Metricool), or
 - Your own internal tooling with explicit user consent and ToS compliance
+
+## Near-term product priority
+
+The near-term priority is:
+
+1. better automation between existing apps
+2. more useful AI inside the strongest workflows
+3. stronger scenario landing for solo operators and small teams
+
+Admin passwords and broader permission controls are intentionally later-stage concerns unless they directly unblock one of the workflows above.

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { FilePlus2, Mail, Plus, Sparkles, Trash2 } from "lucide-react";
 import type { AppWindowProps } from "@/apps/types";
 import { AppToast } from "@/components/AppToast";
+import { SalesHeroWorkflowPanel } from "@/components/workflows/SalesHeroWorkflowPanel";
 import { AppWindowShell } from "@/components/windows/AppWindowShell";
 import { useTimedToast } from "@/hooks/useTimedToast";
 import { createDraft } from "@/lib/drafts";
@@ -18,8 +19,11 @@ import {
   type EmailTone,
 } from "@/lib/email-assistant";
 import { requestOpenClawAgent } from "@/lib/openclaw-agent-client";
+import { upsertSalesAsset } from "@/lib/sales-assets";
 import { createTask, updateTask } from "@/lib/tasks";
 import type { EmailAssistantPrefill } from "@/lib/ui-events";
+import { requestOpenCrm } from "@/lib/ui-events";
+import { getWorkflowRun, setWorkflowRunAwaitingHuman, advanceWorkflowRun } from "@/lib/workflow-runs";
 
 const tones: Array<{ value: EmailTone; label: string }> = [
   { value: "professional", label: "专业" },
@@ -40,6 +44,18 @@ function buildLocalDraft(thread: EmailThread) {
     "",
     "谢谢。",
   ].join("\n");
+}
+
+function extractContextValue(context: string, label: string) {
+  const row = context
+    .split("\n")
+    .find((line) => line.trim().startsWith(`${label}：`) || line.trim().startsWith(`${label}:`));
+  if (!row) return "";
+  return row.split(/[:：]/).slice(1).join(":").trim();
+}
+
+function getTodayDateInputValue() {
+  return new Date().toISOString().slice(0, 10);
 }
 
 export function EmailAssistantAppWindow({
@@ -83,12 +99,32 @@ export function EmailAssistantAppWindow({
         goal: detail?.goal ?? "",
         tone: detail?.tone ?? "professional",
         draft: detail?.draft ?? "",
+        workflowRunId: detail?.workflowRunId,
+        workflowScenarioId: detail?.workflowScenarioId,
+        workflowStageId: detail?.workflowStageId,
+        workflowSource: detail?.workflowSource,
+        workflowNextStep: detail?.workflowNextStep,
+        workflowTriggerType: detail?.workflowTriggerType,
       });
       setSelectedId(id);
       showToast("已带入邮件上下文", "ok");
     };
     window.addEventListener("openclaw:email-assistant-prefill", onPrefill);
     return () => window.removeEventListener("openclaw:email-assistant-prefill", onPrefill);
+  }, [showToast]);
+
+  useEffect(() => {
+    const onSelect = (event: Event) => {
+      const threadId = (event as CustomEvent<{ threadId?: string }>).detail?.threadId;
+      if (!threadId) return;
+      const targetThread = getEmailThreads().find((thread) => thread.id === threadId);
+      if (!targetThread) return;
+      setSelectedId(targetThread.id);
+      showToast("已定位到邮件线程", "ok");
+    };
+    window.addEventListener("openclaw:email-assistant-select", onSelect);
+    return () =>
+      window.removeEventListener("openclaw:email-assistant-select", onSelect);
   }, [showToast]);
 
   const selected = useMemo(
@@ -147,12 +183,41 @@ export function EmailAssistantAppWindow({
         sessionId: "webos-email-assistant",
         timeoutSeconds: 90,
       });
-      patchSelected({ draft: text || fallback });
+      patchSelected({
+        draft: text || fallback,
+        workflowStageId: selected.workflowRunId ? "outreach" : selected.workflowStageId,
+        workflowSource: selected.workflowSource || "Email Assistant 已接收销售跟进上下文",
+        workflowNextStep: "人工检查邮件语气、报价边界和 CTA，确认后再同步到 Personal CRM。",
+      });
+      if (selected.workflowRunId) {
+        upsertSalesAsset(selected.workflowRunId, {
+          scenarioId: "sales-pipeline",
+          emailThreadId: selected.id,
+          company: extractContextValue(selected.context, "公司"),
+          contactName: selected.recipient,
+          inquiryChannel: extractContextValue(selected.context, "询盘来源"),
+          preferredLanguage: extractContextValue(selected.context, "语言偏好"),
+          productLine: extractContextValue(selected.context, "产品线"),
+          requirementSummary: extractContextValue(selected.context, "需求"),
+          preferenceNotes: extractContextValue(selected.context, "预算") || extractContextValue(selected.context, "时间"),
+          objectionNotes: extractContextValue(selected.context, "当前判断"),
+          nextAction: "人工审核这封跟进邮件，然后把结果同步到 Personal CRM。",
+          latestDraftSubject: selected.subject,
+          latestDraftBody: text || fallback,
+          quoteStatus: "drafted",
+          status: "awaiting_review",
+        });
+        setWorkflowRunAwaitingHuman(selected.workflowRunId);
+      }
       updateTask(taskId, { status: "done" });
       showToast("邮件草稿已生成", "ok");
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "生成失败";
-      patchSelected({ draft: fallback });
+      patchSelected({
+        draft: fallback,
+        workflowSource: selected.workflowSource || "Email Assistant 本地兜底生成邮件草稿",
+        workflowNextStep: "建议人工检查后，再继续同步到 CRM。",
+      });
       updateTask(taskId, { status: "error", detail: errorMessage });
       showToast("OpenClaw 不可用，已切换本地草稿", "error");
     } finally {
@@ -170,8 +235,70 @@ export function EmailAssistantAppWindow({
       body: selected.draft,
       tags: ["email", selected.tone],
       source: "import",
+      workflowSource: selected.workflowSource,
+      workflowNextStep: selected.workflowNextStep,
     });
     showToast("已保存到草稿", "ok");
+  };
+
+  const syncToCrm = () => {
+    if (!selected) {
+      showToast("请先选择邮件项", "error");
+      return;
+    }
+    const company = extractContextValue(selected.context, "公司");
+    const need = extractContextValue(selected.context, "需求");
+    const nextStep = "等待客户回复，并根据回复安排下一次沟通或报价。";
+    if (selected.workflowRunId) {
+      const run = getWorkflowRun(selected.workflowRunId);
+      if (run?.currentStageId === "outreach") {
+        advanceWorkflowRun(selected.workflowRunId);
+      }
+      upsertSalesAsset(selected.workflowRunId, {
+        scenarioId: "sales-pipeline",
+        emailThreadId: selected.id,
+        company,
+        contactName: selected.recipient,
+        inquiryChannel: extractContextValue(selected.context, "询盘来源"),
+        preferredLanguage: extractContextValue(selected.context, "语言偏好"),
+        productLine: extractContextValue(selected.context, "产品线"),
+        requirementSummary: need,
+        preferenceNotes: selected.context,
+        objectionNotes: extractContextValue(selected.context, "当前判断"),
+        nextAction: nextStep,
+        latestDraftSubject: selected.subject,
+        latestDraftBody: selected.draft,
+        quoteStatus: "reviewed",
+        status: "crm_syncing",
+      });
+    }
+    patchSelected({
+      workflowStageId: selected.workflowRunId ? "meeting" : selected.workflowStageId,
+      workflowSource: "Email Assistant 已完成人工审核，准备同步 CRM",
+      workflowNextStep: "在 Personal CRM 记录最近触达、客户偏好和下一步动作，完成本轮销售闭环。",
+    });
+    requestOpenCrm({
+      name: selected.recipient,
+      company,
+      role: "客户联系人",
+      status: "active",
+      lastTouch: getTodayDateInputValue(),
+      nextStep,
+      notes: [
+        `邮件主题：${selected.subject || "(未填)"}`,
+        need ? `需求：${need}` : "",
+        selected.draft ? `已审核草稿：\n${selected.draft}` : "",
+      ]
+        .filter(Boolean)
+        .join("\n\n"),
+      workflowRunId: selected.workflowRunId,
+      workflowScenarioId: selected.workflowScenarioId ?? "sales-pipeline",
+      workflowStageId: "meeting",
+      workflowTriggerType: selected.workflowTriggerType,
+      workflowSource: "来自 Email Assistant 的已审核跟进邮件",
+      workflowNextStep: "把触达记录、客户偏好和后续动作写入 CRM，然后完成本轮销售工作流。",
+    });
+    showToast("已发送到 Personal CRM", "ok");
   };
 
   return (
@@ -204,7 +331,30 @@ export function EmailAssistantAppWindow({
           </div>
         </div>
 
-        <div className="grid grid-cols-1 gap-4 p-4 sm:p-6 xl:grid-cols-[320px_minmax(0,1fr)]">
+        <div className="space-y-4 p-4 sm:p-6">
+          <SalesHeroWorkflowPanel
+            workflowRunId={selected?.workflowRunId}
+            title={selected ? `${selected.subject || "未命名邮件"} · 跟进审核阶段` : "Email Assistant · Hero Workflow"}
+            description="这里承担销售链路里最关键的人机协作边界: AI 起草，人工审核，再交给 CRM 做客户推进收口。"
+            emptyHint="当邮件是从 Deal Desk 送过来时，这里会自动显示所属销售 Hero Workflow。"
+            source={selected?.workflowSource}
+            nextStep={selected?.workflowNextStep}
+            actions={[
+              {
+                label: "生成邮件",
+                onClick: generateDraft,
+                disabled: !selected || isGenerating,
+              },
+              {
+                label: "审核后同步 CRM",
+                onClick: syncToCrm,
+                disabled: !selected,
+                tone: "secondary",
+              },
+            ]}
+          />
+
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-[320px_minmax(0,1fr)]">
           <aside className="space-y-4">
             <div className="rounded-2xl border border-gray-200 bg-white p-5">
               <div className="flex items-center justify-between gap-2">
@@ -370,6 +520,7 @@ export function EmailAssistantAppWindow({
               </div>
             </div>
           </main>
+          </div>
         </div>
       </div>
     </AppWindowShell>

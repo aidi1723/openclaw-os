@@ -107,6 +107,7 @@ export const defaultSettings: AppSettings = {
 };
 
 const SETTINGS_KEY = "openclaw.settings.v1";
+const MATRIX_ACCOUNT_IDS = ["xiaohongshu", "douyin", "instagram", "tiktok", "storefront"] as const;
 const VALID_APP_IDS = new Set<AppId>([
   "tech_news_digest",
   "industry_hub",
@@ -156,6 +157,27 @@ function sanitizeAppIds(input: unknown) {
   return result;
 }
 
+export function normalizeMatrixAccountsSettings(
+  saved: Partial<MatrixAccountsSettings> | null | undefined,
+): MatrixAccountsSettings {
+  const defaults = defaultSettings.matrixAccounts;
+  const source = saved ?? {};
+  const result = { ...defaults } as MatrixAccountsSettings;
+
+  for (const id of MATRIX_ACCOUNT_IDS) {
+    const item = (source as Record<string, unknown>)[id] as
+      | undefined
+      | { token?: unknown; webhookUrl?: unknown };
+    result[id] = {
+      token: typeof item?.token === "string" ? item.token : defaults[id].token,
+      webhookUrl:
+        typeof item?.webhookUrl === "string" ? item.webhookUrl : defaults[id].webhookUrl,
+    };
+  }
+
+  return result;
+}
+
 function mergeSettings(saved: Partial<AppSettings> | null | undefined): AppSettings {
   const savedAny = saved as any;
   const legacyKimi = savedAny?.kimi as
@@ -202,30 +224,7 @@ function mergeSettings(saved: Partial<AppSettings> | null | undefined): AppSetti
       }
       return merged;
     })(),
-    matrixAccounts: {
-      ...defaultSettings.matrixAccounts,
-      ...(saved?.matrixAccounts ?? {}),
-      xiaohongshu: {
-        ...defaultSettings.matrixAccounts.xiaohongshu,
-        ...(saved?.matrixAccounts?.xiaohongshu ?? {}),
-      },
-      douyin: {
-        ...defaultSettings.matrixAccounts.douyin,
-        ...(saved?.matrixAccounts?.douyin ?? {}),
-      },
-      instagram: {
-        ...defaultSettings.matrixAccounts.instagram,
-        ...(saved?.matrixAccounts?.instagram ?? {}),
-      },
-      tiktok: {
-        ...defaultSettings.matrixAccounts.tiktok,
-        ...(saved?.matrixAccounts?.tiktok ?? {}),
-      },
-      storefront: {
-        ...defaultSettings.matrixAccounts.storefront,
-        ...(saved?.matrixAccounts?.storefront ?? {}),
-      },
-    },
+    matrixAccounts: normalizeMatrixAccountsSettings(saved?.matrixAccounts),
     personalization: {
       ...defaultSettings.personalization,
       ...(saved?.personalization ?? {}),
@@ -253,7 +252,12 @@ export function hasSavedSettings() {
 }
 
 export function saveSettings(next: AppSettings) {
-  setJsonToStorage(SETTINGS_KEY, next);
+  setJsonToStorage(SETTINGS_KEY, {
+    ...next,
+    // Publish credentials move to the server-backed store and should not be
+    // re-persisted into browser localStorage.
+    matrixAccounts: defaultSettings.matrixAccounts,
+  });
   if (typeof window !== "undefined") {
     window.dispatchEvent(new Event("openclaw:settings"));
   }

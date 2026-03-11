@@ -1,15 +1,18 @@
-# OpenClaw OS — Industry AI Workspace
+# AgentCore OS — Business Solution Operating System
 
-[![CI](https://github.com/aidi1723/openclaw-os/actions/workflows/ci.yml/badge.svg)](https://github.com/aidi1723/openclaw-os/actions/workflows/ci.yml)
+[![CI](https://github.com/aidi1723/agentcore-os/actions/workflows/ci.yml/badge.svg)](https://github.com/aidi1723/agentcore-os/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-A Next.js + Tailwind **desktop-style AI workspace** that runs in the browser.
+**From AI Tools Desktop to Business Solution Operating System.**
 
-It combines a desktop shell, industry workspaces, scenario-based app bundles, local-first state,
-and AI-powered workflow apps into a single entry point.
+AgentCore OS is a Next.js + Tailwind **business solution operating system** that runs in the browser.
 
-The project is no longer just a UI shell. It is now aimed at giving non-technical users a fast way
-to enter real-world AI workflows by opening packaged apps instead of assembling tools from scratch.
+It combines a desktop shell, industry workspaces, role-based desks, scenario packages, local-first state,
+and AI-powered workflow apps into a single operational entry point.
+
+The project is no longer just a UI shell or an AI tools desktop. It is now aimed at giving teams and
+non-technical users a faster way to enter real-world business workflows through packaged solutions,
+workspaces, and workflow-driven apps.
 
 ## Project status
 
@@ -19,6 +22,7 @@ Current repository state:
 - the desktop shell is usable
 - industry workspace selection is available
 - multiple packaged scenario apps are included
+- one cross-app hero workflow is now runnable for `Sales Desk`
 - language-first onboarding is included
 - production hardening is **not** complete yet
 
@@ -31,6 +35,27 @@ Current repository state:
 - Desktop UX: resizable windows + keyboard tiling/restore shortcuts
 - Playbooks: local-first SOP install/save/export/import
 - Publisher: dry-run and queued dispatch with connector-based publishing
+- Publisher config/jobs: file-backed server storage for queue state and connector credentials
+- Publisher queue runner: server-side execution path via `/api/publish/queue/run`
+- Sales Hero Workflow: `Deal Desk -> Email Assistant -> Personal CRM` now shares runtime state, trigger metadata, and local asset write-back
+- Structured inquiry intake: Sales Desk now captures inquiry channel, language preference, product line, and includes a sample inbound lead for first-run demo
+- Multi-industry starters: Industry Hub now includes one-click solution starters for sales, creator, support, research, recruiting, and delivery workflows
+
+## Current product positioning
+
+AgentCore OS is now positioned as a **business solution operating system**, not just a browser desktop full of AI apps.
+
+Current product spine:
+
+- `industry` decides which business context the user belongs to
+- `role` decides which desk and default working surface should open first
+- `workflow` decides the standard sequence, trigger, human review boundary, and result asset path
+- `apps` are execution components inside that workflow, not the primary product story
+
+Current flagship example:
+
+- `Sales Desk`
+  `客户询盘 / 手动录入 -> Deal Desk -> Email Assistant -> Personal CRM -> 本地销售资产沉淀`
 
 ## What it includes
 
@@ -79,7 +104,7 @@ Current repository state:
 - No scraping-based social automation
 - No unofficial posting flows against platforms
 - No built-in auth / multi-tenant security model
-- No secure secret storage by default (this demo stores settings in browser localStorage)
+- No production-grade secret storage or auth model by default
 
 ## Quick start
 
@@ -87,6 +112,9 @@ Current repository state:
 npm install
 npm run dev
 ```
+
+Optional env template:
+- [`.env.example`](/Users/aidi/agent桌面/agentcore-os/.env.example)
 
 Open:
 - App UI: `http://localhost:3000/`
@@ -100,6 +128,15 @@ Run the local connector example:
 npm run webhook:dev
 ```
 
+Optional: run the publish queue worker without relying on an open browser tab:
+
+```bash
+npm run publish-queue:worker
+```
+
+Production examples for PM2, `systemd`, and `launchd` live under [`deploy/`](/Users/aidi/agent桌面/agentcore-os/deploy).
+Template placeholders and replacement instructions are in [`deploy/README.md`](/Users/aidi/agent桌面/agentcore-os/deploy/README.md).
+
 Then in **Settings → Accounts/Publishing**, set a platform's `Publish Webhook URL` to:
 
 `http://127.0.0.1:8787/webhook/publish`
@@ -111,6 +148,8 @@ This example connector only records receipts locally. It does **not** publish to
 ### Start here
 - [Getting Started](docs/GETTING_STARTED.md)
 - [Architecture](docs/ARCHITECTURE.md)
+- [Solution OS Direction](docs/SOLUTION_OS.md)
+- [Hero Workflow Strategy](docs/HERO_WORKFLOW.md)
 - [Connectors](docs/CONNECTORS.md)
 - [Connector Recipes](docs/CONNECTOR_RECIPES.md)
 - [Use Cases](docs/USE_CASES.md)
@@ -119,6 +158,7 @@ This example connector only records receipts locally. It does **not** publish to
 ### Operational docs
 - [Configuration](docs/CONFIGURATION.md)
 - [Deployment](docs/DEPLOYMENT.md)
+- [Next Steps](docs/NEXT_STEPS.md)
 - [Troubleshooting](docs/TROUBLESHOOTING.md)
 - [Roadmap](docs/ROADMAP.md)
 - [Open Source Checklist](docs/OPEN_SOURCE_CHECKLIST.md)
@@ -139,6 +179,7 @@ src/
 scripts/
   webhook-connector/   Local example connector
 docs/
+deploy/
 ```
 
 ## Safety & compliance
@@ -159,6 +200,14 @@ This repository is meant to be a practical AI workspace foundation, not a loopho
 - `npm run stable` — rebuild cleanly and run production server on port 3000
 - `npm run lint` — lint
 - `npm run webhook:dev` — run local webhook connector example
+- `npm run publish-queue:worker` — poll `/api/publish/queue/run` as a background worker
+
+Queue deployment examples:
+- [`deploy/pm2/ecosystem.config.cjs`](/Users/aidi/agent桌面/agentcore-os/deploy/pm2/ecosystem.config.cjs)
+- [`deploy/systemd/openclaw-publish-queue-worker.service`](/Users/aidi/agent桌面/agentcore-os/deploy/systemd/openclaw-publish-queue-worker.service)
+- [`deploy/systemd/openclaw-publish-queue-trigger.service`](/Users/aidi/agent桌面/agentcore-os/deploy/systemd/openclaw-publish-queue-trigger.service)
+- [`deploy/systemd/openclaw-publish-queue-worker.timer`](/Users/aidi/agent桌面/agentcore-os/deploy/systemd/openclaw-publish-queue-worker.timer)
+- [`deploy/launchd/com.openclaw.publish-queue-worker.plist`](/Users/aidi/agent桌面/agentcore-os/deploy/launchd/com.openclaw.publish-queue-worker.plist)
 
 ## Open-source hygiene
 

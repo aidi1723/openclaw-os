@@ -18,7 +18,7 @@ import {
   type RecruitingStage,
 } from "@/lib/recruiting";
 import { createTask, updateTask } from "@/lib/tasks";
-import { requestComposeEmail, requestOpenApp } from "@/lib/ui-events";
+import { requestComposeEmail, requestOpenApp, type RecruitingDeskPrefill } from "@/lib/ui-events";
 
 const stageOptions: Array<{ id: RecruitingStage; label: string }> = [
   { id: "sourced", label: "待筛选" },
@@ -109,6 +109,22 @@ export function RecruitingDeskAppWindow({
       window.removeEventListener("storage", onStorage);
     };
   }, [isVisible]);
+
+  useEffect(() => {
+    const onPrefill = (event: Event) => {
+      const detail = (event as CustomEvent<RecruitingDeskPrefill>).detail;
+      setRecordId(undefined);
+      setRole(detail?.role ?? "");
+      setCandidate(detail?.candidate ?? "");
+      setStage(detail?.stage ?? "screen");
+      setProfile(detail?.profile ?? "");
+      setNotes(detail?.notes ?? "");
+      setScorecard(detail?.scorecard ?? "");
+      showToast("已带入招聘场景上下文", "ok");
+    };
+    window.addEventListener("openclaw:recruiting-desk-prefill", onPrefill);
+    return () => window.removeEventListener("openclaw:recruiting-desk-prefill", onPrefill);
+  }, [showToast]);
 
   const generateScorecard = async () => {
     if (!role.trim() && !candidate.trim()) {

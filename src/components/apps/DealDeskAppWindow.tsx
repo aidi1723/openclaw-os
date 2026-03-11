@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Briefcase, FilePlus2, Plus, Sparkles, Trash2 } from "lucide-react";
+import { Briefcase, FilePlus2, MessageSquareQuote, Plus, Sparkles, Trash2 } from "lucide-react";
 import type { AppWindowProps } from "@/apps/types";
 import { AppToast } from "@/components/AppToast";
+import { SalesHeroWorkflowPanel } from "@/components/workflows/SalesHeroWorkflowPanel";
 import { AppWindowShell } from "@/components/windows/AppWindowShell";
 import { useTimedToast } from "@/hooks/useTimedToast";
 import { createDraft } from "@/lib/drafts";
@@ -18,11 +19,22 @@ import {
   type DealStage,
 } from "@/lib/deals";
 import { requestOpenClawAgent } from "@/lib/openclaw-agent-client";
+import { upsertSalesAsset } from "@/lib/sales-assets";
+import {
+  buildSalesWorkflowMeta,
+  getSalesWorkflowScenario,
+} from "@/lib/sales-workflow";
 import { createTask, updateTask } from "@/lib/tasks";
 import {
   requestComposeEmail,
   type DealDeskPrefill,
 } from "@/lib/ui-events";
+import {
+  advanceWorkflowRun,
+  getWorkflowRun,
+  startWorkflowRun,
+  type WorkflowTriggerType,
+} from "@/lib/workflow-runs";
 
 const stages: Array<{ value: DealStage; label: string }> = [
   { value: "new", label: "新线索" },
@@ -32,11 +44,34 @@ const stages: Array<{ value: DealStage; label: string }> = [
   { value: "won", label: "已成交" },
 ];
 
+const inquiryChannels = ["Email", "WhatsApp", "Website Form", "Expo", "Referral"];
+
+const sampleInquiry: DealDeskPrefill = {
+  company: "Al Noor Facades LLC",
+  contact: "Omar Rahman",
+  inquiryChannel: "WhatsApp",
+  preferredLanguage: "English + Arabic summary",
+  productLine: "断桥铝门窗 / Sliding System",
+  need:
+    "迪拜住宅项目需要断桥铝推拉门和三层玻璃系统，优先考虑隔热、海边防腐和 6 周内可出货的规格。",
+  budget: "USD 28,000 - 35,000",
+  timing: "两周内确认方案，下月进入首批下单",
+  notes:
+    "客户希望先收到英文报价，附阿拉伯语摘要。最关注交期、玻璃配置和最小起订量，接受视频会议进一步确认尺寸。",
+  stage: "new",
+  workflowTriggerType: "inbound_message",
+  workflowSource: "来自 WhatsApp 的海外门窗询盘",
+  workflowNextStep: "先确认尺寸、玻璃配置、交期和 MOQ，再生成英文报价跟进邮件。",
+};
+
 function buildLocalBrief(deal: DealRecord) {
   return [
     "【Deal Brief】",
     `- 公司：${deal.company || "未填写"}`,
     `- 联系人：${deal.contact || "未填写"}`,
+    `- 来源：${deal.inquiryChannel || "未填写"}`,
+    `- 产品：${deal.productLine || "未填写"}`,
+    `- 语言：${deal.preferredLanguage || "未填写"}`,
     `- 需求：${deal.need || "未填写"}`,
     `- 预算：${deal.budget || "未填写"}`,
     `- 时间：${deal.timing || "未填写"}`,
@@ -49,6 +84,10 @@ function buildLocalBrief(deal: DealRecord) {
     "- 如果匹配度高，尽快安排方案会或发送提案。",
     "- 如果当前阻塞，明确卡点并设置跟进时间。",
   ].join("\n");
+}
+
+function getDefaultTriggerType(deal: DealRecord): WorkflowTriggerType {
+  return deal.workflowTriggerType ?? "web_form";
 }
 
 export function DealDeskAppWindow({
@@ -88,17 +127,34 @@ export function DealDeskAppWindow({
       const id = createDeal({
         company: detail?.company ?? "",
         contact: detail?.contact ?? "",
+        inquiryChannel: detail?.inquiryChannel ?? "",
+        preferredLanguage: detail?.preferredLanguage ?? "",
+        productLine: detail?.productLine ?? "",
         need: detail?.need ?? "",
         budget: detail?.budget ?? "",
         timing: detail?.timing ?? "",
         notes: detail?.notes ?? "",
         stage: detail?.stage ?? "new",
+        ...buildSalesWorkflowMeta(detail),
       });
       setSelectedId(id);
       showToast("已带入线索上下文", "ok");
     };
     window.addEventListener("openclaw:deal-desk-prefill", onPrefill);
     return () => window.removeEventListener("openclaw:deal-desk-prefill", onPrefill);
+  }, [showToast]);
+
+  useEffect(() => {
+    const onSelect = (event: Event) => {
+      const dealId = (event as CustomEvent<{ dealId?: string }>).detail?.dealId;
+      if (!dealId) return;
+      const targetDeal = getDeals().find((deal) => deal.id === dealId);
+      if (!targetDeal) return;
+      setSelectedId(targetDeal.id);
+      showToast("已定位到线索记录", "ok");
+    };
+    window.addEventListener("openclaw:deal-desk-select", onSelect);
+    return () => window.removeEventListener("openclaw:deal-desk-select", onSelect);
   }, [showToast]);
 
   const selected = useMemo(
@@ -119,6 +175,24 @@ export function DealDeskAppWindow({
     showToast("已新增线索", "ok");
   };
 
+  const createSampleInquiry = () => {
+    const id = createDeal({
+      company: sampleInquiry.company,
+      contact: sampleInquiry.contact,
+      inquiryChannel: sampleInquiry.inquiryChannel,
+      preferredLanguage: sampleInquiry.preferredLanguage,
+      productLine: sampleInquiry.productLine,
+      need: sampleInquiry.need,
+      budget: sampleInquiry.budget,
+      timing: sampleInquiry.timing,
+      notes: sampleInquiry.notes,
+      stage: sampleInquiry.stage,
+      ...buildSalesWorkflowMeta(sampleInquiry),
+    });
+    setSelectedId(id);
+    showToast("已导入样板询盘", "ok");
+  };
+
   const deleteSelected = () => {
     if (!selected) return;
     removeDeal(selected.id);
@@ -126,11 +200,57 @@ export function DealDeskAppWindow({
     showToast("线索已删除", "ok");
   };
 
+  const ensureWorkflowForSelected = (triggerType?: WorkflowTriggerType) => {
+    if (!selected) return null;
+    const resolvedTriggerType = triggerType ?? getDefaultTriggerType(selected);
+    if (selected.workflowRunId) return selected.workflowRunId;
+    const scenario = getSalesWorkflowScenario();
+    if (!scenario) return null;
+    const runId = startWorkflowRun(scenario, resolvedTriggerType);
+    patchSelected({
+      workflowRunId: runId,
+      workflowScenarioId: scenario.id,
+      workflowStageId: scenario.workflowStages[0]?.id,
+      workflowTriggerType: resolvedTriggerType,
+      workflowSource: "来自 Deal Desk 的销售询盘录入",
+      workflowNextStep: "先完成线索资格判断，再决定是否进入跟进邮件生成。",
+    });
+    upsertSalesAsset(runId, {
+      scenarioId: scenario.id,
+      dealId: selected.id,
+      company: selected.company,
+      contactName: selected.contact,
+      inquiryChannel: selected.inquiryChannel,
+      preferredLanguage: selected.preferredLanguage,
+      productLine: selected.productLine,
+      requirementSummary: selected.need,
+      preferenceNotes: selected.notes,
+      quoteStatus: "not_started",
+      nextAction: "先完成资格判断，确认是否值得推进。",
+      status: "qualifying",
+    });
+    return runId;
+  };
+
+  const startInquiryWorkflow = () => {
+    if (!selected) {
+      showToast("请先选择线索", "error");
+      return;
+    }
+    const runId = ensureWorkflowForSelected("inbound_message");
+    if (!runId) {
+      showToast("销售流程模板不可用", "error");
+      return;
+    }
+    showToast("已启动销售 Hero Workflow", "ok");
+  };
+
   const qualifyDeal = async () => {
     if (!selected) {
       showToast("请先选择线索", "error");
       return;
     }
+    const runId = ensureWorkflowForSelected();
     const fallback = buildLocalBrief(selected);
     const taskId = createTask({
       name: "Assistant - Deal qualification",
@@ -148,6 +268,9 @@ export function DealDeskAppWindow({
         "3) 给出下一步建议，尽量可执行。\n\n" +
         `公司：${selected.company}\n` +
         `联系人：${selected.contact || "(未填)"}\n` +
+        `询盘来源：${selected.inquiryChannel || "(未填)"}\n` +
+        `产品线：${selected.productLine || "(未填)"}\n` +
+        `语言偏好：${selected.preferredLanguage || "(未填)"}\n` +
         `需求：${selected.need || "(未填)"}\n` +
         `预算：${selected.budget || "(未填)"}\n` +
         `时间：${selected.timing || "(未填)"}\n` +
@@ -158,15 +281,45 @@ export function DealDeskAppWindow({
         sessionId: "webos-deal-desk",
         timeoutSeconds: 90,
       });
+      const run = runId ? getWorkflowRun(runId) : null;
       patchSelected({
         brief: text || fallback,
         stage: selected.stage === "new" ? "qualified" : selected.stage,
+        workflowRunId: runId ?? selected.workflowRunId,
+        workflowScenarioId: selected.workflowScenarioId ?? "sales-pipeline",
+        workflowStageId: run?.currentStageId === "qualify" ? "outreach" : selected.workflowStageId,
+        workflowSource: "Deal Desk 已完成线索资格判断",
+        workflowNextStep: "把这条线索送到 Email Assistant 生成首轮跟进邮件，并进行人工审核。",
       });
+      if (runId) {
+        upsertSalesAsset(runId, {
+          scenarioId: "sales-pipeline",
+          dealId: selected.id,
+          company: selected.company,
+          contactName: selected.contact,
+          inquiryChannel: selected.inquiryChannel,
+          preferredLanguage: selected.preferredLanguage,
+          productLine: selected.productLine,
+          requirementSummary: selected.need || text || fallback,
+          preferenceNotes: selected.notes,
+          nextAction: "进入 Email Assistant 生成并审核首轮跟进邮件。",
+          quoteNotes: text || fallback,
+          quoteStatus: "drafted",
+          status: "qualifying",
+        });
+        if (run?.currentStageId === "qualify") {
+          advanceWorkflowRun(runId);
+        }
+      }
       updateTask(taskId, { status: "done" });
       showToast("线索简报已生成", "ok");
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "生成失败";
-      patchSelected({ brief: fallback });
+      patchSelected({
+        brief: fallback,
+        workflowSource: "Deal Desk 本地兜底生成资格判断",
+        workflowNextStep: "建议检查判断内容后，再把线索送入邮件跟进阶段。",
+      });
       updateTask(taskId, { status: "error", detail: errorMessage });
       showToast("OpenClaw 不可用，已切换本地简报", "error");
     } finally {
@@ -197,6 +350,8 @@ export function DealDeskAppWindow({
       body: selected.brief,
       tags: ["deal", selected.stage],
       source: "import",
+      workflowSource: selected.workflowSource,
+      workflowNextStep: selected.workflowNextStep,
     });
     showToast("已保存到草稿", "ok");
   };
@@ -206,6 +361,27 @@ export function DealDeskAppWindow({
       showToast("请先选择线索", "error");
       return;
     }
+    const runId = ensureWorkflowForSelected();
+    const run = runId ? getWorkflowRun(runId) : null;
+    const nextStep = "在 Email Assistant 生成首轮跟进稿，人工确认后再同步到 Personal CRM。";
+    patchSelected({
+      workflowRunId: runId ?? selected.workflowRunId,
+      workflowStageId: run?.currentStageId === "qualify" ? "outreach" : selected.workflowStageId ?? "outreach",
+      workflowSource: "来自 Deal Desk 的已判断线索",
+      workflowNextStep: nextStep,
+    });
+    if (runId) {
+      upsertSalesAsset(runId, {
+        scenarioId: "sales-pipeline",
+        dealId: selected.id,
+        company: selected.company,
+        contactName: selected.contact,
+        requirementSummary: selected.need || selected.brief,
+        preferenceNotes: selected.notes,
+        nextAction: nextStep,
+        status: "awaiting_review",
+      });
+    }
     requestComposeEmail({
       subject: `关于 ${selected.company || "合作"} 的下一步沟通`,
       recipient: selected.contact,
@@ -214,6 +390,9 @@ export function DealDeskAppWindow({
       context: [
         `公司：${selected.company || "(未填)"}`,
         `联系人：${selected.contact || "(未填)"}`,
+        `询盘来源：${selected.inquiryChannel || "(未填)"}`,
+        `产品线：${selected.productLine || "(未填)"}`,
+        `语言偏好：${selected.preferredLanguage || "(未填)"}`,
         `需求：${selected.need || "(未填)"}`,
         `预算：${selected.budget || "(未填)"}`,
         `时间：${selected.timing || "(未填)"}`,
@@ -221,6 +400,12 @@ export function DealDeskAppWindow({
       ]
         .filter(Boolean)
         .join("\n"),
+      workflowRunId: runId ?? selected.workflowRunId,
+      workflowScenarioId: "sales-pipeline",
+      workflowStageId: "outreach",
+      workflowTriggerType: selected.workflowTriggerType,
+      workflowSource: "来自 Deal Desk 的已判断线索",
+      workflowNextStep: nextStep,
     });
     showToast("已发送到 Email Assistant", "ok");
   };
@@ -255,7 +440,35 @@ export function DealDeskAppWindow({
           </div>
         </div>
 
-        <div className="grid grid-cols-1 gap-4 p-4 sm:p-6 xl:grid-cols-[320px_minmax(0,1fr)]">
+        <div className="space-y-4 p-4 sm:p-6">
+          <SalesHeroWorkflowPanel
+            workflowRunId={selected?.workflowRunId}
+            title={selected ? `${selected.company || "未命名线索"} · 销售推进总览` : "Sales Desk · Hero Workflow"}
+            description="把线索判断、邮件跟进和 CRM 收口变成一条可追踪的销售主线，而不是分散的单点操作。"
+            emptyHint="先绑定一条线索，再从客户询盘或手动录入启动销售 Hero Workflow。"
+            source={selected?.workflowSource}
+            nextStep={selected?.workflowNextStep}
+            actions={[
+              {
+                label: selected?.workflowRunId ? "已绑定询盘流程" : "按客户询盘启动",
+                onClick: startInquiryWorkflow,
+                disabled: !selected || Boolean(selected?.workflowRunId),
+              },
+              {
+                label: "导入样板询盘",
+                onClick: createSampleInquiry,
+                tone: "secondary",
+              },
+              {
+                label: "送入 Email Assistant",
+                onClick: sendToEmailAssistant,
+                disabled: !selected,
+                tone: "secondary",
+              },
+            ]}
+          />
+
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-[320px_minmax(0,1fr)]">
           <aside className="space-y-4">
             <div className="rounded-2xl border border-gray-200 bg-white p-5">
               <div className="flex items-center justify-between gap-2">
@@ -269,6 +482,14 @@ export function DealDeskAppWindow({
                   新建
                 </button>
               </div>
+              <button
+                type="button"
+                onClick={createSampleInquiry}
+                className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800 transition-colors hover:bg-amber-100"
+              >
+                <MessageSquareQuote className="h-4 w-4" />
+                导入样板询盘
+              </button>
 
               <div className="mt-3 space-y-2">
                 {deals.length > 0 ? (
@@ -288,7 +509,7 @@ export function DealDeskAppWindow({
                       >
                         <div className="text-sm font-semibold">{deal.company}</div>
                         <div className={["mt-1 text-xs", active ? "text-white/75" : "text-gray-500"].join(" ")}>
-                          {deal.contact || "未填写联系人"} · {deal.stage}
+                          {deal.contact || "未填写联系人"} · {deal.inquiryChannel || "未标注来源"} · {deal.stage}
                         </div>
                       </button>
                     );
@@ -339,6 +560,39 @@ export function DealDeskAppWindow({
                       />
                     </div>
                     <div>
+                      <label className="mb-2 block text-xs font-semibold text-gray-600">询盘来源</label>
+                      <select
+                        value={selected.inquiryChannel}
+                        onChange={(e) => patchSelected({ inquiryChannel: e.target.value })}
+                        className="w-full rounded-xl border border-gray-300 px-4 py-2.5 text-sm text-gray-900 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      >
+                        <option value="">请选择来源</option>
+                        {inquiryChannels.map((channel) => (
+                          <option key={channel} value={channel}>
+                            {channel}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="mb-2 block text-xs font-semibold text-gray-600">语言偏好</label>
+                      <input
+                        value={selected.preferredLanguage}
+                        onChange={(e) => patchSelected({ preferredLanguage: e.target.value })}
+                        placeholder="例如：English / Arabic summary"
+                        className="w-full rounded-xl border border-gray-300 px-4 py-2.5 text-sm text-gray-900 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                    <div className="md:col-span-2">
+                      <label className="mb-2 block text-xs font-semibold text-gray-600">产品线 / 场景</label>
+                      <input
+                        value={selected.productLine}
+                        onChange={(e) => patchSelected({ productLine: e.target.value })}
+                        placeholder="例如：Sliding System / Casement Window / Curtain Wall"
+                        className="w-full rounded-xl border border-gray-300 px-4 py-2.5 text-sm text-gray-900 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                    <div>
                       <label className="mb-2 block text-xs font-semibold text-gray-600">预算</label>
                       <input
                         value={selected.budget}
@@ -383,6 +637,23 @@ export function DealDeskAppWindow({
                           </option>
                         ))}
                       </select>
+                    </div>
+                    <div className="rounded-2xl border border-blue-100 bg-blue-50 p-4 md:col-span-2">
+                      <div className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-700">Inquiry Snapshot</div>
+                      <div className="mt-2 grid gap-2 text-sm text-blue-950 md:grid-cols-3">
+                        <div>
+                          <div className="text-[11px] font-semibold text-blue-600">来源</div>
+                          <div className="mt-1">{selected.inquiryChannel || "待补充"}</div>
+                        </div>
+                        <div>
+                          <div className="text-[11px] font-semibold text-blue-600">产品线</div>
+                          <div className="mt-1">{selected.productLine || "待补充"}</div>
+                        </div>
+                        <div>
+                          <div className="text-[11px] font-semibold text-blue-600">语言偏好</div>
+                          <div className="mt-1">{selected.preferredLanguage || "待补充"}</div>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </>
@@ -452,6 +723,7 @@ export function DealDeskAppWindow({
               </div>
             </div>
           </main>
+          </div>
         </div>
       </div>
     </AppWindowShell>

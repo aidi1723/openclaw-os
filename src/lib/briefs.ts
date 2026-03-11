@@ -1,10 +1,12 @@
+import type { ResearchWorkflowMeta } from "@/lib/research-workflow";
+
 export type BriefRecord = {
   id: string;
   focus: string;
   notes: string;
   content: string;
   createdAt: number;
-};
+} & ResearchWorkflowMeta;
 
 type Listener = () => void;
 

@@ -1,5 +1,5 @@
 {
-  "name": "openclaw-os",
+  "name": "agentcore-os",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -9,7 +9,8 @@
     "start": "next start",
     "stable": "node -e \"require('fs').rmSync('.next',{recursive:true,force:true});\" && next build && next start -p 3000",
     "lint": "next lint",
-    "webhook:dev": "node scripts/webhook-connector/server.mjs"
+    "webhook:dev": "node scripts/webhook-connector/server.mjs",
+    "publish-queue:worker": "node scripts/publish-queue-worker.mjs"
   },
   "dependencies": {
     "lucide-react": "^0.468.0",

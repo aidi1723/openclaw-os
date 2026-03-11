@@ -18,7 +18,7 @@ import {
   type ProjectOpsRecord,
 } from "@/lib/project-ops";
 import { createTask, updateTask } from "@/lib/tasks";
-import { requestOpenApp, requestOpenMorningBrief } from "@/lib/ui-events";
+import { requestOpenApp, requestOpenMorningBrief, type ProjectOpsPrefill } from "@/lib/ui-events";
 
 const healthOptions: Array<{ id: ProjectHealth; label: string }> = [
   { id: "green", label: "健康" },
@@ -110,6 +110,23 @@ export function ProjectOpsAppWindow({
       window.removeEventListener("storage", onStorage);
     };
   }, [isVisible]);
+
+  useEffect(() => {
+    const onPrefill = (event: Event) => {
+      const detail = (event as CustomEvent<ProjectOpsPrefill>).detail;
+      setRecordId(undefined);
+      setProject(detail?.project ?? "");
+      setOwner(detail?.owner ?? "");
+      setHealth(detail?.health ?? "green");
+      setObjective(detail?.objective ?? "");
+      setUpdates(detail?.updates ?? "");
+      setBlockers(detail?.blockers ?? "");
+      setBrief(detail?.brief ?? "");
+      showToast("已带入项目交付场景", "ok");
+    };
+    window.addEventListener("openclaw:project-ops-prefill", onPrefill);
+    return () => window.removeEventListener("openclaw:project-ops-prefill", onPrefill);
+  }, [showToast]);
 
   const generateBrief = async () => {
     if (!project.trim()) {

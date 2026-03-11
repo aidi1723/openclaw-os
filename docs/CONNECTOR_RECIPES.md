@@ -1,8 +1,8 @@
 # Connector Recipes (Reference)
 
-These are **safe, compliant** reference patterns for wiring OpenClaw OS to real-world publishing and ops tools.
+These are **safe, compliant** reference patterns for wiring AgentCore OS to real-world publishing and ops tools.
 
-OpenClaw OS emits a publish payload and can dispatch it to a webhook. Your connector should implement actual posting via **official APIs** or approved services.
+AgentCore OS emits a publish payload and can dispatch it to a webhook. Your connector should implement actual posting via **official APIs** or approved services.
 
 ## Recipe A: Make (Integromat) webhook → scheduler
 
@@ -27,7 +27,7 @@ Use your connector as a normalization layer:
 - Receive OpenClaw payload
 - Convert it to the scheduler’s required fields
 - Submit via the scheduler’s API (or supported automation entry points)
-- Return `{ ok: true, id }` back to OpenClaw OS for receipts
+- Return `{ ok: true, id }` back to AgentCore OS for receipts
 
 ## Recipe D: Internal queue + retries
 

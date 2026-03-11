@@ -4,11 +4,14 @@ import { useEffect, useMemo, useState } from "react";
 import { FilePlus2, Headphones, Plus, Sparkles, Trash2 } from "lucide-react";
 import type { AppWindowProps } from "@/apps/types";
 import { AppToast } from "@/components/AppToast";
+import { SupportHeroWorkflowPanel } from "@/components/workflows/SupportHeroWorkflowPanel";
 import { AppWindowShell } from "@/components/windows/AppWindowShell";
 import { useTimedToast } from "@/hooks/useTimedToast";
 import { createDraft } from "@/lib/drafts";
 import { getOutputLanguageInstruction } from "@/lib/language";
 import { requestOpenClawAgent } from "@/lib/openclaw-agent-client";
+import { upsertSupportAsset } from "@/lib/support-assets";
+import { buildSupportWorkflowMeta, getSupportWorkflowScenario } from "@/lib/support-workflow";
 import {
   createSupportTicket,
   getSupportTickets,
@@ -20,7 +23,15 @@ import {
   type SupportTicket,
 } from "@/lib/support";
 import { createTask, updateTask } from "@/lib/tasks";
-import { requestOpenCrm } from "@/lib/ui-events";
+import { requestOpenCrm, requestOpenKnowledgeVault, type SupportCopilotPrefill } from "@/lib/ui-events";
+import {
+  advanceWorkflowRun,
+  completeWorkflowRun,
+  getWorkflowRun,
+  setWorkflowRunAwaitingHuman,
+  startWorkflowRun,
+  type WorkflowTriggerType,
+} from "@/lib/workflow-runs";
 
 const channelOptions: Array<{ value: SupportChannel; label: string }> = [
   { value: "email", label: "Email" },
@@ -43,6 +54,10 @@ function buildLocalReply(ticket: SupportTicket) {
     `下一步建议：${ticket.message.slice(0, 80) || "确认订单/上下文，再给出时间和方案。"}。`,
     "如果方便，也请补充订单号、时间点或截图，这样能更快定位。",
   ].join("\n");
+}
+
+function getDefaultTriggerType(ticket: SupportTicket): WorkflowTriggerType {
+  return ticket.workflowTriggerType ?? "manual";
 }
 
 export function SupportCopilotAppWindow({
@@ -76,6 +91,39 @@ export function SupportCopilotAppWindow({
     };
   }, [isVisible]);
 
+  useEffect(() => {
+    const onPrefill = (event: Event) => {
+      const detail = (event as CustomEvent<SupportCopilotPrefill>).detail;
+      const id = createSupportTicket({
+        customer: detail?.customer ?? "",
+        channel: detail?.channel ?? "email",
+        subject: detail?.subject ?? "",
+        message: detail?.message ?? "",
+        status: detail?.status ?? "new",
+        replyDraft: detail?.replyDraft ?? "",
+        ...buildSupportWorkflowMeta(detail),
+      });
+      setSelectedId(id);
+      showToast("已带入客服场景上下文", "ok");
+    };
+    window.addEventListener("openclaw:support-copilot-prefill", onPrefill);
+    return () => window.removeEventListener("openclaw:support-copilot-prefill", onPrefill);
+  }, [showToast]);
+
+  useEffect(() => {
+    const onSelect = (event: Event) => {
+      const ticketId = (event as CustomEvent<{ ticketId?: string }>).detail?.ticketId;
+      if (!ticketId) return;
+      const targetTicket = getSupportTickets().find((ticket) => ticket.id === ticketId);
+      if (!targetTicket) return;
+      setSelectedId(targetTicket.id);
+      showToast("已定位到客服工单", "ok");
+    };
+    window.addEventListener("openclaw:support-copilot-select", onSelect);
+    return () =>
+      window.removeEventListener("openclaw:support-copilot-select", onSelect);
+  }, [showToast]);
+
   const selected = useMemo(
     () => tickets.find((ticket) => ticket.id === selectedId) ?? null,
     [selectedId, tickets],
@@ -99,11 +147,40 @@ export function SupportCopilotAppWindow({
     showToast("工单已删除", "ok");
   };
 
+  const ensureWorkflowForSelected = (triggerType?: WorkflowTriggerType) => {
+    if (!selected) return null;
+    const resolvedTriggerType = triggerType ?? getDefaultTriggerType(selected);
+    if (selected.workflowRunId) return selected.workflowRunId;
+    const scenario = getSupportWorkflowScenario();
+    if (!scenario) return null;
+    const runId = startWorkflowRun(scenario, resolvedTriggerType);
+    advanceWorkflowRun(runId);
+    patchSelected({
+      workflowRunId: runId,
+      workflowScenarioId: scenario.id,
+      workflowStageId: "reply",
+      workflowTriggerType: resolvedTriggerType,
+      workflowSource: "来自 Support Copilot 的手动问题录入",
+      workflowNextStep: "先生成建议回复，再由人工确认是否外发或升级处理。",
+    });
+    upsertSupportAsset(runId, {
+      scenarioId: scenario.id,
+      ticketId: selected.id,
+      customer: selected.customer,
+      channel: selected.channel,
+      issueSummary: selected.message.slice(0, 220),
+      nextAction: "先生成建议回复，再由人工审核。",
+      status: "replying",
+    });
+    return runId;
+  };
+
   const generateReply = async () => {
     if (!selected) {
       showToast("请先选择工单", "error");
       return;
     }
+    const runId = ensureWorkflowForSelected();
     const fallback = buildLocalReply(selected);
     const taskId = createTask({
       name: "Assistant - Support reply",
@@ -130,12 +207,37 @@ export function SupportCopilotAppWindow({
         sessionId: "webos-support-copilot",
         timeoutSeconds: 90,
       });
-      patchSelected({ replyDraft: text || fallback });
+      const nextReply = text || fallback;
+      patchSelected({
+        replyDraft: nextReply,
+        workflowRunId: runId ?? selected.workflowRunId,
+        workflowScenarioId: selected.workflowScenarioId ?? "support-ops",
+        workflowStageId: "reply",
+        workflowSource: "Support Copilot 已生成建议回复",
+        workflowNextStep: "人工确认回复边界后，再决定是否转任务跟进或沉淀成 FAQ。",
+      });
+      if (runId) {
+        upsertSupportAsset(runId, {
+          scenarioId: "support-ops",
+          ticketId: selected.id,
+          customer: selected.customer,
+          channel: selected.channel,
+          issueSummary: selected.message.slice(0, 220),
+          latestReply: nextReply,
+          nextAction: "人工确认当前回复，确认是否需要升级处理或转成任务。",
+          status: "replying",
+        });
+        setWorkflowRunAwaitingHuman(runId);
+      }
       updateTask(taskId, { status: "done" });
       showToast("回复草稿已生成", "ok");
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "生成失败";
-      patchSelected({ replyDraft: fallback });
+      patchSelected({
+        replyDraft: fallback,
+        workflowSource: "Support Copilot 本地兜底生成回复草稿",
+        workflowNextStep: "建议人工检查回复后，再决定是否进入跟进。",
+      });
       updateTask(taskId, { status: "error", detail: errorMessage });
       showToast("OpenClaw 不可用，已切换本地回复", "error");
     } finally {
@@ -153,6 +255,12 @@ export function SupportCopilotAppWindow({
       body: selected.replyDraft,
       tags: ["support", selected.channel],
       source: "import",
+      workflowRunId: selected.workflowRunId,
+      workflowScenarioId: selected.workflowScenarioId,
+      workflowStageId: selected.workflowStageId,
+      workflowTriggerType: selected.workflowTriggerType,
+      workflowSource: selected.workflowSource,
+      workflowNextStep: selected.workflowNextStep,
     });
     showToast("已保存到草稿", "ok");
   };
@@ -167,7 +275,74 @@ export function SupportCopilotAppWindow({
       status: "queued",
       detail: selected.subject || "客户回复跟进",
     });
+    if (selected.workflowRunId) {
+      const run = getWorkflowRun(selected.workflowRunId);
+      if (run?.currentStageId === "reply") {
+        advanceWorkflowRun(selected.workflowRunId);
+      }
+      patchSelected({
+        workflowStageId: "followup",
+        workflowSource: "Support Copilot 已完成人工确认，进入后续跟进阶段",
+        workflowNextStep: "把这次处理沉淀成 FAQ 或升级规则，避免重复人工处理。",
+      });
+      upsertSupportAsset(selected.workflowRunId, {
+        scenarioId: selected.workflowScenarioId ?? "support-ops",
+        ticketId: selected.id,
+        customer: selected.customer,
+        channel: selected.channel,
+        issueSummary: selected.message.slice(0, 220),
+        latestReply: selected.replyDraft,
+        escalationTask: selected.subject || "客户问题跟进",
+        nextAction: "完成跟进后，把高频问题沉淀成 FAQ 条目。",
+        status: "followup",
+      });
+    }
     showToast("已加入任务中心", "ok");
+  };
+
+  const sendToKnowledgeVault = () => {
+    if (!selected) {
+      showToast("请先选择工单", "error");
+      return;
+    }
+    const faqDraft = [
+      `问题主题：${selected.subject || "未命名问题"}`,
+      `客户渠道：${selected.channel}`,
+      `问题摘要：${selected.message || "(未填)"}`,
+      selected.replyDraft ? `建议回复：\n${selected.replyDraft}` : "",
+      "请整理成 FAQ 条目，输出：适用场景、标准回复、升级边界、需要人工确认的条件。",
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+
+    if (selected.workflowRunId) {
+      const run = getWorkflowRun(selected.workflowRunId);
+      if (run?.currentStageId === "followup") {
+        advanceWorkflowRun(selected.workflowRunId);
+      }
+      patchSelected({
+        workflowStageId: "faq",
+        workflowSource: "Support Copilot 已准备沉淀 FAQ 资产",
+        workflowNextStep: "本轮问题处理已接近完成，把 FAQ、升级规则和标准回复写回知识层。",
+      });
+      upsertSupportAsset(selected.workflowRunId, {
+        scenarioId: selected.workflowScenarioId ?? "support-ops",
+        ticketId: selected.id,
+        customer: selected.customer,
+        channel: selected.channel,
+        issueSummary: selected.message.slice(0, 220),
+        latestReply: selected.replyDraft,
+        faqDraft,
+        nextAction: "FAQ 已准备完成，确认知识条目后即可结束本轮工作流。",
+        status: "faq",
+      });
+      completeWorkflowRun(selected.workflowRunId);
+    }
+
+    requestOpenKnowledgeVault({
+      query: faqDraft,
+    });
+    showToast("已发送到 Knowledge Vault", "ok");
   };
 
   const sendToCrm = () => {
@@ -235,7 +410,30 @@ export function SupportCopilotAppWindow({
           </div>
         </div>
 
-        <div className="grid grid-cols-1 gap-4 p-4 sm:p-6 xl:grid-cols-[320px_minmax(0,1fr)]">
+        <div className="space-y-4 p-4 sm:p-6">
+          <SupportHeroWorkflowPanel
+            workflowRunId={selected?.workflowRunId}
+            title={selected ? `${selected.subject || "未命名工单"} · 回复与跟进阶段` : "Support Copilot · Hero Workflow"}
+            description="Support Copilot 负责客服链里最关键的人机协作边界: AI 起草建议回复，人工确认风险边界，再把结果转成跟进动作和 FAQ 资产。"
+            emptyHint="当问题是从 Inbox 送过来时，这里会自动显示所属 Support Hero Workflow。"
+            source={selected?.workflowSource}
+            nextStep={selected?.workflowNextStep}
+            actions={[
+              {
+                label: "生成回复",
+                onClick: generateReply,
+                disabled: !selected || isGenerating,
+              },
+              {
+                label: "沉淀 FAQ",
+                onClick: sendToKnowledgeVault,
+                disabled: !selected,
+                tone: "secondary",
+              },
+            ]}
+          />
+
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-[320px_minmax(0,1fr)]">
           <aside className="space-y-4">
             <div className="rounded-2xl border border-gray-200 bg-white p-5">
               <div className="flex items-center justify-between gap-2">
@@ -405,6 +603,14 @@ export function SupportCopilotAppWindow({
                   >
                     发送到 CRM
                   </button>
+                  <button
+                    type="button"
+                    onClick={sendToKnowledgeVault}
+                    disabled={!selected}
+                    className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700 transition-colors hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    沉淀 FAQ
+                  </button>
                 </div>
               </div>
 
@@ -423,6 +629,7 @@ export function SupportCopilotAppWindow({
               </div>
             </div>
           </main>
+          </div>
         </div>
       </div>
     </AppWindowShell>

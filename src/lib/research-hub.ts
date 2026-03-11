@@ -1,3 +1,5 @@
+import type { ResearchWorkflowMeta } from "@/lib/research-workflow";
+
 export type ResearchReportRecord = {
   id: string;
   topic: string;
@@ -8,7 +10,7 @@ export type ResearchReportRecord = {
   report: string;
   createdAt: number;
   updatedAt: number;
-};
+} & ResearchWorkflowMeta;
 
 type Listener = () => void;
 
@@ -59,6 +61,12 @@ export function createResearchReport(
     audience: input?.audience ?? "",
     notes: input?.notes ?? "",
     report: input?.report ?? "",
+    workflowRunId: input?.workflowRunId,
+    workflowScenarioId: input?.workflowScenarioId,
+    workflowStageId: input?.workflowStageId,
+    workflowSource: input?.workflowSource?.trim() || undefined,
+    workflowNextStep: input?.workflowNextStep?.trim() || undefined,
+    workflowTriggerType: input?.workflowTriggerType,
     createdAt: now,
     updatedAt: now,
   };

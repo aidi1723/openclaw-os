@@ -14,7 +14,7 @@ import type { AppWindowProps } from "@/apps/types";
 import { AppToast } from "@/components/AppToast";
 import { AppWindowShell } from "@/components/windows/AppWindowShell";
 import { useTimedToast } from "@/hooks/useTimedToast";
-import { loadSettings } from "@/lib/settings";
+import { getPublishConfig, refreshPublishConfig, subscribePublishConfig } from "@/lib/publish-config";
 import { requestOpenSettings } from "@/lib/ui-events";
 
 type CategoryId = "social" | "cms" | "comms";
@@ -52,24 +52,22 @@ export function AccountCenterAppWindow({
   onClose,
 }: AppWindowProps) {
   const [activeCategory, setActiveCategory] = useState<CategoryId>("social");
-  const [settingsVersion, setSettingsVersion] = useState(0);
+  const [configVersion, setConfigVersion] = useState(0);
   const { toast, showToast } = useTimedToast(2000);
 
   useEffect(() => {
-    const sync = () => setSettingsVersion((v) => v + 1);
-    window.addEventListener("openclaw:settings", sync);
-    window.addEventListener("storage", sync);
+    void refreshPublishConfig();
+    const sync = () => setConfigVersion((v) => v + 1);
+    const unsubscribe = subscribePublishConfig(sync);
     return () => {
-      window.removeEventListener("openclaw:settings", sync);
-      window.removeEventListener("storage", sync);
+      unsubscribe();
     };
   }, []);
 
   const cards: PlatformCard[] = useMemo(
     () => {
-      void settingsVersion;
-      const settings = loadSettings();
-      const matrix = settings.matrixAccounts;
+      void configVersion;
+      const matrix = getPublishConfig();
       const socialCards: PlatformCard[] = [
         {
           id: "xiaohongshu",
@@ -229,7 +227,7 @@ export function AccountCenterAppWindow({
         },
       ];
     },
-    [settingsVersion],
+    [configVersion],
   );
 
   const filtered = useMemo(

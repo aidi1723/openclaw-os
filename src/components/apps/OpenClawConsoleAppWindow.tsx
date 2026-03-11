@@ -4,8 +4,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ExternalLink, Shield, TerminalSquare } from "lucide-react";
 import type { AppWindowProps } from "@/apps/types";
 import { AppToast } from "@/components/AppToast";
+import { UnifiedAssetConsole } from "@/components/workflows/UnifiedAssetConsole";
 import { AppWindowShell } from "@/components/windows/AppWindowShell";
 import { useTimedToast } from "@/hooks/useTimedToast";
+import { jumpToAssetTarget } from "@/lib/asset-jumps";
 import { loadSettings } from "@/lib/settings";
 import { requestOpenSettings } from "@/lib/ui-events";
 
@@ -128,6 +130,11 @@ export function OpenClawConsoleAppWindow({
             </button>
           </div>
         </div>
+
+        <UnifiedAssetConsole
+          language={loadSettings().personalization.interfaceLanguage}
+          onOpenAsset={(target) => jumpToAssetTarget(target)}
+        />
 
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
           <div className="rounded-2xl border border-gray-200 bg-white p-5 space-y-4 lg:col-span-2">

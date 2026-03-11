@@ -4,9 +4,12 @@ import { useEffect, useMemo, useState } from "react";
 import { FilePlus2, Inbox, Sparkles, Trash2 } from "lucide-react";
 import type { AppWindowProps } from "@/apps/types";
 import { AppToast } from "@/components/AppToast";
+import { SupportHeroWorkflowPanel } from "@/components/workflows/SupportHeroWorkflowPanel";
 import { AppWindowShell } from "@/components/windows/AppWindowShell";
 import { useTimedToast } from "@/hooks/useTimedToast";
 import { createDraft } from "@/lib/drafts";
+import { upsertSupportAsset } from "@/lib/support-assets";
+import { buildSupportWorkflowMeta, getSupportWorkflowScenario } from "@/lib/support-workflow";
 import { getOutputLanguageInstruction } from "@/lib/language";
 import {
   createInboxDigest,
@@ -15,13 +18,20 @@ import {
   getInboxItems,
   removeInboxItem,
   subscribeInbox,
+  updateInboxItem,
   type InboxDigest,
   type InboxItem,
   type InboxSource,
 } from "@/lib/inbox";
 import { requestOpenClawAgent } from "@/lib/openclaw-agent-client";
 import { createTask, updateTask } from "@/lib/tasks";
-import { requestComposeEmail } from "@/lib/ui-events";
+import { requestComposeEmail, requestOpenSupportCopilot } from "@/lib/ui-events";
+import {
+  advanceWorkflowRun,
+  getWorkflowRun,
+  startWorkflowRun,
+  type WorkflowTriggerType,
+} from "@/lib/workflow-runs";
 
 const sourceOptions: Array<{ value: InboxSource; label: string }> = [
   { value: "newsletter", label: "Newsletter" },
@@ -87,6 +97,58 @@ export function InboxDeclutterAppWindow({
     };
   }, [isVisible]);
 
+  useEffect(() => {
+    const onSelect = (event: Event) => {
+      const itemId = (event as CustomEvent<{ itemId?: string }>).detail?.itemId;
+      if (!itemId) return;
+      const targetItem = getInboxItems().find((item) => item.id === itemId);
+      if (!targetItem) return;
+      updateInboxItem(targetItem.id, {});
+      setSource(targetItem.source);
+      setTitle(targetItem.title);
+      setBody(targetItem.body);
+      setFocus(targetItem.title);
+      showToast("已定位到收件箱条目", "ok");
+    };
+    window.addEventListener("openclaw:inbox-select", onSelect);
+    return () => window.removeEventListener("openclaw:inbox-select", onSelect);
+  }, [showToast]);
+
+  const activeWorkflowItem = useMemo(
+    () => items.find((item) => item.workflowRunId) ?? null,
+    [items],
+  );
+
+  const getLatestItemById = (itemId: string) => getInboxItems().find((item) => item.id === itemId) ?? null;
+
+  const ensureWorkflowForItem = (item: InboxItem, triggerType?: WorkflowTriggerType) => {
+    const latest = getLatestItemById(item.id) ?? item;
+    const resolvedTriggerType = triggerType ?? latest.workflowTriggerType ?? "inbound_message";
+    if (latest.workflowRunId) return latest.workflowRunId;
+    const scenario = getSupportWorkflowScenario();
+    if (!scenario) return null;
+    const runId = startWorkflowRun(scenario, resolvedTriggerType);
+    updateInboxItem(item.id, {
+      workflowRunId: runId,
+      workflowScenarioId: scenario.id,
+      workflowStageId: scenario.workflowStages[0]?.id,
+      workflowTriggerType: resolvedTriggerType,
+      workflowSource: "来自 Inbox Declutter 的客户消息收拢",
+      workflowNextStep: "先把客户问题送进 Support Copilot，生成建议回复并做人审。",
+    });
+    upsertSupportAsset(runId, {
+      scenarioId: scenario.id,
+      inboxItemId: item.id,
+      customer: item.title,
+      channel: item.source,
+      issueSummary: item.body.slice(0, 220),
+      latestDigest: digest,
+      nextAction: "把这一条客户消息送进 Support Copilot，生成可发送回复。",
+      status: "capture",
+    });
+    return runId;
+  };
+
   const addItem = () => {
     if (!body.trim()) {
       showToast("请先输入邮件内容", "error");
@@ -129,6 +191,18 @@ export function InboxDeclutterAppWindow({
       });
       setDigest(text || fallback);
       createInboxDigest({ focus, content: text || fallback });
+      if (activeWorkflowItem?.workflowRunId) {
+        upsertSupportAsset(activeWorkflowItem.workflowRunId, {
+          scenarioId: activeWorkflowItem.workflowScenarioId ?? "support-ops",
+          inboxItemId: activeWorkflowItem.id,
+          customer: activeWorkflowItem.title,
+          channel: activeWorkflowItem.source,
+          issueSummary: activeWorkflowItem.body.slice(0, 220),
+          latestDigest: text || fallback,
+          nextAction: "从 Digest 中挑一条最优先的客户问题，送进 Support Copilot。",
+          status: "capture",
+        });
+      }
       updateTask(taskId, { status: "done" });
       showToast("Digest 已生成", "ok");
     } catch (err) {
@@ -152,6 +226,12 @@ export function InboxDeclutterAppWindow({
       body: digest,
       tags: ["inbox", "digest"],
       source: "import",
+      workflowRunId: activeWorkflowItem?.workflowRunId,
+      workflowScenarioId: activeWorkflowItem?.workflowScenarioId,
+      workflowStageId: activeWorkflowItem?.workflowStageId,
+      workflowTriggerType: activeWorkflowItem?.workflowTriggerType,
+      workflowSource: activeWorkflowItem?.workflowSource,
+      workflowNextStep: activeWorkflowItem?.workflowNextStep,
     });
     showToast("已保存到草稿", "ok");
   };
@@ -164,6 +244,56 @@ export function InboxDeclutterAppWindow({
       tone: item.source === "client" ? "professional" : "warm",
     });
     showToast("已发送到 Email Assistant", "ok");
+  };
+
+  const sendItemToSupport = (item: InboxItem) => {
+    const runId = ensureWorkflowForItem(item, "inbound_message");
+    const latest = getLatestItemById(item.id) ?? item;
+    const run = runId ? getWorkflowRun(runId) : null;
+    if (runId) {
+      upsertSupportAsset(runId, {
+        scenarioId: latest.workflowScenarioId ?? "support-ops",
+        inboxItemId: item.id,
+        customer: item.title,
+        channel: item.source,
+        issueSummary: item.body.slice(0, 220),
+        latestDigest: digest,
+        nextAction: "在 Support Copilot 里生成建议回复，人工确认后再转任务或沉淀 FAQ。",
+        status: "replying",
+      });
+      if (run?.currentStageId === "capture") {
+        advanceWorkflowRun(runId);
+      }
+      updateInboxItem(item.id, {
+        workflowRunId: runId,
+        workflowScenarioId: latest.workflowScenarioId ?? "support-ops",
+        workflowStageId: run?.currentStageId === "capture" ? "reply" : latest.workflowStageId ?? "reply",
+        workflowTriggerType: latest.workflowTriggerType ?? "inbound_message",
+        workflowSource: "Inbox Declutter 已完成消息收拢，准备进入 Support Copilot",
+        workflowNextStep: "先生成建议回复，再决定是否升级成任务或 FAQ。",
+      });
+    }
+    requestOpenSupportCopilot({
+      customer: item.title || "客户消息",
+      channel:
+        item.source === "client"
+          ? "email"
+          : item.source === "internal"
+            ? "whatsapp"
+            : "instagram",
+      subject: item.title,
+      message: item.body,
+      status: "new",
+      ...buildSupportWorkflowMeta({
+        workflowRunId: runId ?? latest.workflowRunId,
+        workflowScenarioId: latest.workflowScenarioId ?? "support-ops",
+        workflowStageId: run?.currentStageId === "capture" ? "reply" : latest.workflowStageId ?? "reply",
+        workflowTriggerType: latest.workflowTriggerType ?? "inbound_message",
+        workflowSource: "来自 Inbox Declutter 的已收拢客户问题",
+        workflowNextStep: "在 Support Copilot 生成建议回复，并进行人工审核。",
+      }),
+    });
+    showToast("已发送到 Support Copilot", "ok");
   };
 
   const summary = useMemo(
@@ -213,7 +343,24 @@ export function InboxDeclutterAppWindow({
           </div>
         </div>
 
-        <div className="grid grid-cols-1 gap-4 p-4 sm:p-6 xl:grid-cols-[360px_minmax(0,1fr)]">
+        <div className="space-y-4 p-4 sm:p-6">
+          <SupportHeroWorkflowPanel
+            workflowRunId={activeWorkflowItem?.workflowRunId}
+            title={activeWorkflowItem ? `${activeWorkflowItem.title || "未命名问题"} · 消息收拢阶段` : "Inbox Declutter · Support Workflow"}
+            description="Inbox 在这条客服链里承担的是事件入口和收拢层，让分散在私信、邮件和评论里的问题先变成可推进的单一上下文。"
+            emptyHint="当你把客户消息送进 Support Copilot 后，这里会显示 Support Hero Workflow 的阶段状态和资产快照。"
+            source={activeWorkflowItem?.workflowSource}
+            nextStep={activeWorkflowItem?.workflowNextStep}
+            actions={[
+              {
+                label: "生成 Digest",
+                onClick: generateDigest,
+                disabled: isGenerating,
+              },
+            ]}
+          />
+
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-[360px_minmax(0,1fr)]">
           <aside className="space-y-4">
             <div className="rounded-2xl border border-gray-200 bg-white p-5">
               <div className="text-sm font-semibold text-gray-900">录入邮件 / 消息</div>
@@ -271,20 +418,31 @@ export function InboxDeclutterAppWindow({
                           <div className="text-sm font-semibold text-gray-900">{item.title}</div>
                           <div className="mt-1 text-xs text-gray-500">{item.source}</div>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => sendItemToEmail(item)}
-                          className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 transition-colors hover:bg-gray-50"
-                        >
-                          写邮件
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => removeInboxItem(item.id)}
-                          className="rounded-lg border border-gray-200 bg-white p-2 text-gray-600 transition-colors hover:bg-gray-50"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
+                        <div className="flex items-center gap-2">
+                          {item.source === "client" ? (
+                            <button
+                              type="button"
+                              onClick={() => sendItemToSupport(item)}
+                              className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700 transition-colors hover:bg-emerald-100"
+                            >
+                              送 Support
+                            </button>
+                          ) : null}
+                          <button
+                            type="button"
+                            onClick={() => sendItemToEmail(item)}
+                            className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 transition-colors hover:bg-gray-50"
+                          >
+                            写邮件
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => removeInboxItem(item.id)}
+                            className="rounded-lg border border-gray-200 bg-white p-2 text-gray-600 transition-colors hover:bg-gray-50"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
                       </div>
                     </div>
                   ))
@@ -375,6 +533,7 @@ export function InboxDeclutterAppWindow({
               </div>
             </div>
           </main>
+          </div>
         </div>
       </div>
     </AppWindowShell>
