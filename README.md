@@ -146,6 +146,7 @@ npm run publish-queue:worker
 
 ### Start here
 - [Getting Started](docs/GETTING_STARTED.md)
+- [User Guide (ZH)](docs/USER_GUIDE.zh-CN.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Solution OS Direction](docs/SOLUTION_OS.md)
 - [Hero Workflow Strategy](docs/HERO_WORKFLOW.md)
