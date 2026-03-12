@@ -69,10 +69,10 @@ The bundled worker script `npm run publish-queue:worker` supports this automatic
 
 Operational examples for PM2, `systemd`, and `launchd` are available under:
 
-- [`deploy/pm2/`](/Users/aidi/agent桌面/agentcore-os/deploy/pm2)
-- [`deploy/systemd/`](/Users/aidi/agent桌面/agentcore-os/deploy/systemd)
-- [`deploy/launchd/`](/Users/aidi/agent桌面/agentcore-os/deploy/launchd)
+- [`deploy/pm2/`](../deploy/pm2)
+- [`deploy/systemd/`](../deploy/systemd)
+- [`deploy/launchd/`](../deploy/launchd)
 
 Base environment variable examples are in:
 
-- [`.env.example`](/Users/aidi/agent桌面/agentcore-os/.env.example)
+- [`.env.example`](../.env.example)

@@ -6,6 +6,7 @@ import { Activity, AlertTriangle, CheckCircle2, Clock3, Copy, RefreshCw, RotateC
 import type { AppWindowProps } from "@/apps/types";
 import { CreatorHeroWorkflowPanel } from "@/components/workflows/CreatorHeroWorkflowPanel";
 import { AppWindowShell } from "@/components/windows/AppWindowShell";
+import { buildAgentCoreApiUrl } from "@/lib/app-api";
 import { upsertCreatorAsset } from "@/lib/creator-assets";
 import {
   createDraft,
@@ -390,13 +391,18 @@ export function PublisherAppWindow({
     if (!isVisible) return;
     let cancelled = false;
     const run = async () => {
-      const health = await fetch("/api/publish/connector/health", { method: "GET" })
+      const health = await fetch(buildAgentCoreApiUrl("/api/publish/connector/health"), {
+        method: "GET",
+      })
         .then((r) => r.json())
         .catch(() => null);
       if (cancelled) return;
       setConnectorOnline(Boolean(health?.ok));
 
-      const jobsRes = await fetch("/api/publish/connector/jobs?limit=12", { method: "GET" })
+      const jobsRes = await fetch(
+        buildAgentCoreApiUrl("/api/publish/connector/jobs?limit=12"),
+        { method: "GET" },
+      )
         .then((r) => r.json())
         .catch(() => null);
       if (cancelled) return;
@@ -576,7 +582,7 @@ export function PublisherAppWindow({
   };
 
   const triggerQueueRun = async () => {
-    await fetch("/api/publish/queue/run", {
+    await fetch(buildAgentCoreApiUrl("/api/publish/queue/run"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       cache: "no-store",

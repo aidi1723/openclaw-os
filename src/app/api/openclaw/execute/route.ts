@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { runOpenClawAgent } from "@/lib/openclaw-cli";
+import { normalizeBaseUrl } from "@/lib/url-utils";
 
 export const runtime = "nodejs";
 
@@ -23,18 +24,6 @@ type VideoPlan = {
   clipStartSeconds?: number; // integer seconds
   clipSeconds?: number | null; // integer seconds
 };
-
-function normalizeBaseUrl(input: string) {
-  const trimmed = input.trim();
-  if (!trimmed) return "";
-  const noSlash = trimmed.replace(/\/+$/, "");
-  const normalizedWs = noSlash.replace(/^wss:\/\//i, "https://").replace(
-    /^ws:\/\//i,
-    "http://",
-  );
-  if (/^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//.test(normalizedWs)) return normalizedWs;
-  return `http://${normalizedWs}`;
-}
 
 function ensureDataUrlFromBase64(maybeBase64: string) {
   const v = maybeBase64.trim();
@@ -174,7 +163,7 @@ function parseOutputFromUnknown(payload: any): ExecuteOutput | null {
 }
 
 async function saveUploadedFile(file: File) {
-  const root = path.join("/tmp", "openclaw-os", "uploads");
+  const root = path.join("/tmp", "agentcore-os", "uploads");
   await mkdir(root, { recursive: true });
   const safeName = file.name.replace(/[^\w.\-() ]+/g, "_");
   const filename = `${Date.now()}-${Math.random().toString(16).slice(2)}-${safeName}`;
@@ -182,6 +171,39 @@ async function saveUploadedFile(file: File) {
   const buf = Buffer.from(await file.arrayBuffer());
   await writeFile(fullPath, buf);
   return fullPath;
+}
+
+const TMP_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
+let lastCleanupAt = 0;
+
+async function cleanupOldTmpFiles() {
+  const now = Date.now();
+  // Run at most once per hour
+  if (now - lastCleanupAt < 60 * 60 * 1000) return;
+  lastCleanupAt = now;
+
+  const dirs = [
+    path.join("/tmp", "agentcore-os", "uploads"),
+    path.join("/tmp", "agentcore-os", "outputs"),
+  ];
+  for (const dir of dirs) {
+    try {
+      const entries = await readdir(dir);
+      for (const entry of entries) {
+        try {
+          const filePath = path.join(dir, entry);
+          const info = await stat(filePath);
+          if (now - info.mtimeMs > TMP_MAX_AGE_MS) {
+            await unlink(filePath).catch(() => null);
+          }
+        } catch {
+          // skip individual file errors
+        }
+      }
+    } catch {
+      // directory may not exist yet
+    }
+  }
 }
 
 async function runFfmpeg(args: string[]) {
@@ -252,7 +274,7 @@ async function localVideoFramesExecute(params: {
   prompt: string;
   fileUrl: string;
 }): Promise<ExecuteOk> {
-  const outRoot = path.join("/tmp", "openclaw-os", "outputs");
+  const outRoot = path.join("/tmp", "agentcore-os", "outputs");
   await mkdir(outRoot, { recursive: true });
   const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
@@ -425,6 +447,9 @@ async function callOpenClawChat(params: {
 }
 
 export async function POST(req: Request) {
+  // Fire-and-forget cleanup of old temp files
+  void cleanupOldTmpFiles();
+
   try {
     const contentType = req.headers.get("content-type") ?? "";
 

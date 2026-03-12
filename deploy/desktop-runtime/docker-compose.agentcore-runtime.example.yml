@@ -1,0 +1,87 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: ${AGENTCORE_POSTGRES_IMAGE}
+    container_name: ${COMPOSE_PROJECT_NAME}-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "${POSTGRES_PORT}:5432"
+    volumes:
+      - agentcore-postgres-data:/var/lib/postgresql/data
+
+  redis:
+    image: ${AGENTCORE_REDIS_IMAGE}
+    container_name: ${COMPOSE_PROJECT_NAME}-redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT}:6379"
+    volumes:
+      - agentcore-redis-data:/data
+
+  qdrant:
+    image: ${AGENTCORE_QDRANT_IMAGE}
+    container_name: ${COMPOSE_PROJECT_NAME}-qdrant
+    restart: unless-stopped
+    ports:
+      - "${QDRANT_PORT}:6333"
+    volumes:
+      - agentcore-qdrant-data:/qdrant/storage
+
+  dify-api:
+    image: ${AGENTCORE_DIFY_API_IMAGE}
+    container_name: ${COMPOSE_PROJECT_NAME}-dify-api
+    restart: unless-stopped
+    depends_on:
+      - postgres
+      - redis
+      - qdrant
+    environment:
+      MODE: api
+      APP_WEB_URL: ${AGENTCORE_RUNTIME_APP_URL}
+      CONSOLE_WEB_URL: ${AGENTCORE_RUNTIME_APP_URL}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      VECTOR_STORE: qdrant
+      QDRANT_URL: http://qdrant:6333
+    ports:
+      - "${DIFY_API_PORT}:5001"
+
+  dify-worker:
+    image: ${AGENTCORE_DIFY_WORKER_IMAGE}
+    container_name: ${COMPOSE_PROJECT_NAME}-dify-worker
+    restart: unless-stopped
+    depends_on:
+      - postgres
+      - redis
+      - qdrant
+      - dify-api
+    environment:
+      MODE: worker
+      APP_WEB_URL: ${AGENTCORE_RUNTIME_APP_URL}
+      CONSOLE_WEB_URL: ${AGENTCORE_RUNTIME_APP_URL}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      VECTOR_STORE: qdrant
+      QDRANT_URL: http://qdrant:6333
+    ports:
+      - "${DIFY_WORKER_PORT}:5002"
+
+volumes:
+  agentcore-postgres-data:
+  agentcore-redis-data:
+  agentcore-qdrant-data:

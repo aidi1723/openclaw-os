@@ -6,6 +6,7 @@ import type { AppWindowProps } from "@/apps/types";
 import { AppToast } from "@/components/AppToast";
 import { AppWindowShell } from "@/components/windows/AppWindowShell";
 import { useTimedToast } from "@/hooks/useTimedToast";
+import { buildAgentCoreApiUrl } from "@/lib/app-api";
 import { loadSettings } from "@/lib/settings";
 import {
   createTask,
@@ -115,7 +116,7 @@ export function CreativeStudioAppWindow({
       form.append("engineUrl", engineUrl);
       form.append("token", token);
 
-      const res = await fetch("/api/openclaw/execute", {
+      const res = await fetch(buildAgentCoreApiUrl("/api/openclaw/execute"), {
         method: "POST",
         body: form,
         signal: controller.signal,

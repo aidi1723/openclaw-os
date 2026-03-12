@@ -6,6 +6,8 @@ import type { AppWindowProps } from "@/apps/types";
 import { AppToast } from "@/components/AppToast";
 import { AppWindowShell } from "@/components/windows/AppWindowShell";
 import { useTimedToast } from "@/hooks/useTimedToast";
+import { buildAgentCoreApiUrl } from "@/lib/app-api";
+import { getActiveLlmConfig, loadSettings } from "@/lib/settings";
 import { createTask, updateTask, type TaskId } from "@/lib/tasks";
 import type { KnowledgeVaultPrefill } from "@/lib/ui-events";
 
@@ -139,10 +141,22 @@ export function KnowledgeVaultAppWindow({
 
     try {
       const inFolder = files.filter((f) => f.folderId === activeFolder);
-      const res = await fetch("/api/openclaw/vault/query", {
+      const settings = loadSettings();
+      const activeLlm = getActiveLlmConfig(settings);
+      const res = await fetch(buildAgentCoreApiUrl("/api/openclaw/vault/query"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: q, folderName, files: inFolder }),
+        body: JSON.stringify({
+          query: q,
+          folderName,
+          files: inFolder,
+          llm: {
+            provider: activeLlm.id,
+            apiKey: activeLlm.config.apiKey,
+            baseUrl: activeLlm.config.baseUrl,
+            model: activeLlm.config.model,
+          },
+        }),
       });
       const data = (await res.json().catch(() => null)) as
         | null

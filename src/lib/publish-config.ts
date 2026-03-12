@@ -1,3 +1,4 @@
+import { buildAgentCoreApiUrl } from "@/lib/app-api";
 import { defaultSettings, loadSettings, normalizeMatrixAccountsSettings, type MatrixAccountsSettings } from "@/lib/settings";
 
 type Listener = () => void;
@@ -41,7 +42,10 @@ export function getPublishConfig() {
 export async function refreshPublishConfig() {
   if (typeof window === "undefined") return configCache;
   try {
-    const res = await fetch("/api/publish/config", { method: "GET", cache: "no-store" });
+    const res = await fetch(buildAgentCoreApiUrl("/api/publish/config"), {
+      method: "GET",
+      cache: "no-store",
+    });
     const data = (await res.json().catch(() => null)) as
       | null
       | { ok?: boolean; data?: { matrixAccounts?: Partial<MatrixAccountsSettings> } };
@@ -61,7 +65,7 @@ export async function refreshPublishConfig() {
 
 export async function savePublishConfig(next: MatrixAccountsSettings) {
   if (typeof window === "undefined") return configCache;
-  const res = await fetch("/api/publish/config", {
+  const res = await fetch(buildAgentCoreApiUrl("/api/publish/config"), {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ matrixAccounts: next }),

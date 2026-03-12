@@ -1,0 +1,10 @@
+[Unit]
+Description=Run AgentCore publish queue trigger on a schedule
+
+[Timer]
+OnBootSec=20s
+OnUnitActiveSec=30s
+Unit=agentcore-publish-queue-trigger.service
+
+[Install]
+WantedBy=timers.target

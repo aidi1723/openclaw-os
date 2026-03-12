@@ -1,3 +1,5 @@
+import { buildAgentCoreApiUrl } from "@/lib/app-api";
+
 export type PublishJobId = string;
 
 export type PublishPlatformId =
@@ -78,7 +80,10 @@ export function getPublishJobs() {
 export async function refreshPublishJobs() {
   if (typeof window === "undefined") return jobsCache;
   try {
-    const res = await fetch("/api/publish/jobs", { method: "GET", cache: "no-store" });
+    const res = await fetch(buildAgentCoreApiUrl("/api/publish/jobs"), {
+      method: "GET",
+      cache: "no-store",
+    });
     const data = (await res.json().catch(() => null)) as
       | null
       | { ok?: boolean; data?: { jobs?: PublishJobRecord[] } };
@@ -100,7 +105,7 @@ export async function createPublishJob(input: {
   status?: PublishJobStatus;
   maxAttempts?: number;
 }) {
-  const res = await fetch("/api/publish/jobs", {
+  const res = await fetch(buildAgentCoreApiUrl("/api/publish/jobs"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
@@ -120,11 +125,14 @@ export async function updatePublishJob(
   jobId: PublishJobId,
   patch: PublishJobPatch,
 ) {
-  const res = await fetch(`/api/publish/jobs/${encodeURIComponent(jobId)}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(patch),
-  });
+  const res = await fetch(
+    buildAgentCoreApiUrl(`/api/publish/jobs/${encodeURIComponent(jobId)}`),
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    },
+  );
   const data = (await res.json().catch(() => null)) as
     | null
     | { ok?: boolean; data?: { job?: PublishJobRecord }; error?: string };
@@ -137,9 +145,12 @@ export async function updatePublishJob(
 }
 
 export async function removePublishJob(jobId: PublishJobId) {
-  const res = await fetch(`/api/publish/jobs/${encodeURIComponent(jobId)}`, {
-    method: "DELETE",
-  });
+  const res = await fetch(
+    buildAgentCoreApiUrl(`/api/publish/jobs/${encodeURIComponent(jobId)}`),
+    {
+      method: "DELETE",
+    },
+  );
   const data = (await res.json().catch(() => null)) as null | { ok?: boolean; error?: string };
   if (!res.ok || !data?.ok) {
     throw new Error(data?.error || "删除任务失败");

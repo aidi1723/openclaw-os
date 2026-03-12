@@ -1,7 +1,7 @@
 module.exports = {
   apps: [
     {
-      name: "openclaw-web",
+      name: "agentcore-web",
       cwd: "__OPENCLAW_APP_DIR__",
       script: "npm",
       args: "run start",
@@ -13,7 +13,7 @@ module.exports = {
       max_restarts: 10,
     },
     {
-      name: "openclaw-publish-queue-worker",
+      name: "agentcore-publish-queue-worker",
       cwd: "__OPENCLAW_APP_DIR__",
       script: "npm",
       args: "run publish-queue:worker",

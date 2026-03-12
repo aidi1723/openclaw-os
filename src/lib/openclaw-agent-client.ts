@@ -1,14 +1,42 @@
 "use client";
 
-export async function requestOpenClawAgent(input: {
+import { buildAgentCoreApiUrl } from "@/lib/app-api";
+import { getActiveLlmConfig, loadSettings } from "@/lib/settings";
+
+export type OpenClawAgentRequestInput = {
   message: string;
   sessionId: string;
   timeoutSeconds?: number;
-}) {
-  const res = await fetch("/api/openclaw/agent", {
+};
+
+export function buildOpenClawAgentRequest(input: OpenClawAgentRequestInput) {
+  const settings = loadSettings();
+  const { id, config } = getActiveLlmConfig(settings);
+
+  return {
+    ...input,
+    systemPrompt: settings.assistant.systemPrompt || "",
+    useSkills: true,
+    workspaceContext: {
+      activeIndustry: settings.personalization.activeIndustry,
+      activeScenarioId: settings.personalization.activeScenarioId,
+      runtimeProfile: settings.runtime.profile,
+      runtimeShell: settings.runtime.shell,
+    },
+    llm: {
+      provider: id,
+      apiKey: config.apiKey,
+      baseUrl: config.baseUrl,
+      model: config.model,
+    },
+  };
+}
+
+export async function requestOpenClawAgent(input: OpenClawAgentRequestInput) {
+  const res = await fetch(buildAgentCoreApiUrl("/api/openclaw/agent"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(input),
+    body: JSON.stringify(buildOpenClawAgentRequest(input)),
   });
 
   const data = (await res.json().catch(() => null)) as

@@ -1,18 +1,8 @@
 import { NextResponse } from "next/server";
 
-type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
+import { normalizeBaseUrl } from "@/lib/url-utils";
 
-function normalizeBaseUrl(input: string) {
-  const trimmed = input.trim();
-  if (!trimmed) return "";
-  const noSlash = trimmed.replace(/\/+$/, "");
-  const normalizedWs = noSlash.replace(/^wss:\/\//i, "https://").replace(
-    /^ws:\/\//i,
-    "http://",
-  );
-  if (/^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//.test(normalizedWs)) return normalizedWs;
-  return `http://${normalizedWs}`;
-}
+type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
 
 function chatCompletionsUrl(baseUrl: string) {
   if (/\/v1$/.test(baseUrl)) return `${baseUrl}/chat/completions`;
@@ -64,31 +54,27 @@ export async function POST(req: Request) {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 60_000);
 
-    let upstream: Response;
-    try {
-      upstream = await fetch(url, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          "Content-Type": "application/json",
-          Accept: stream ? "text/event-stream" : "application/json",
-        },
-        body: JSON.stringify({
-          model,
-          messages,
-          stream,
-          temperature: 0.7,
-        }),
-        signal: controller.signal,
-        cache: "no-store",
-      });
-    } finally {
-      clearTimeout(timeoutId);
-    }
+    const upstream = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        Accept: stream ? "text/event-stream" : "application/json",
+      },
+      body: JSON.stringify({
+        model,
+        messages,
+        stream,
+        temperature: 0.7,
+      }),
+      signal: controller.signal,
+      cache: "no-store",
+    });
 
     const contentType = upstream.headers.get("content-type") ?? "";
 
     if (!upstream.ok) {
+      clearTimeout(timeoutId);
       const text = await upstream.text().catch(() => "");
       return NextResponse.json(
         {
@@ -100,7 +86,41 @@ export async function POST(req: Request) {
     }
 
     if (contentType.includes("text/event-stream")) {
-      return new Response(upstream.body, {
+      // For streaming responses, keep the abort controller alive so that
+      // a stuck upstream will eventually be cancelled.  Clear the timeout
+      // only after the stream finishes (or errors).
+      const rawBody = upstream.body;
+      if (!rawBody) {
+        clearTimeout(timeoutId);
+        return NextResponse.json(
+          { ok: false, error: "上游未返回流数据" },
+          { status: 502, headers: { "Cache-Control": "no-store" } },
+        );
+      }
+
+      const reader = rawBody.getReader();
+      const stream = new ReadableStream({
+        async pull(ctrl) {
+          try {
+            const { done, value } = await reader.read();
+            if (done) {
+              clearTimeout(timeoutId);
+              ctrl.close();
+            } else {
+              ctrl.enqueue(value);
+            }
+          } catch (err) {
+            clearTimeout(timeoutId);
+            ctrl.error(err);
+          }
+        },
+        cancel() {
+          clearTimeout(timeoutId);
+          reader.cancel().catch(() => null);
+        },
+      });
+
+      return new Response(stream, {
         status: 200,
         headers: {
           "Content-Type": "text/event-stream; charset=utf-8",
@@ -111,6 +131,7 @@ export async function POST(req: Request) {
       });
     }
 
+    clearTimeout(timeoutId);
     const json = await upstream.json().catch(() => null);
     return NextResponse.json(json, {
       headers: { "Cache-Control": "no-store" },

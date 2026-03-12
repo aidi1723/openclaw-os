@@ -6,7 +6,7 @@ import {
   type PublishJobStatus,
   type PublishPlatformId,
 } from "@/lib/publish";
-import { readJsonFile, writeJsonFile } from "@/lib/server/json-store";
+import { readJsonFile, readModifyWrite } from "@/lib/server/json-store";
 
 const FILE_NAME = "publish-jobs.json";
 
@@ -89,13 +89,13 @@ function normalizeJob(input: unknown): PublishJobRecord | null {
   };
 }
 
-async function readAll() {
-  const raw = await readJsonFile<unknown[]>(FILE_NAME, []);
+function normalizeAll(raw: unknown[]): PublishJobRecord[] {
   return raw.map(normalizeJob).filter((job): job is PublishJobRecord => Boolean(job));
 }
 
-async function writeAll(next: PublishJobRecord[]) {
-  await writeJsonFile(FILE_NAME, next);
+async function readAll() {
+  const raw = await readJsonFile<unknown[]>(FILE_NAME, []);
+  return normalizeAll(raw);
 }
 
 export async function listPublishJobs() {
@@ -126,8 +126,10 @@ export async function createPublishJobRecord(input: {
     createdAt: now,
     updatedAt: now,
   };
-  const next = [job, ...(await readAll())];
-  await writeAll(next);
+  await readModifyWrite<unknown[]>(FILE_NAME, [], (current) => [
+    job,
+    ...normalizeAll(current),
+  ]);
   return job;
 }
 
@@ -135,48 +137,50 @@ export async function updatePublishJobRecord(
   jobId: PublishJobId,
   patch: PublishJobPatch,
 ) {
-  const current = await readAll();
   let updated: PublishJobRecord | null = null;
-  const now = Date.now();
-  const next = current.map((job) => {
-    if (job.id !== jobId) return job;
-    updated = {
-      ...job,
-      draftId:
-        patch.draftId === undefined ? job.draftId : typeof patch.draftId === "string" && patch.draftId.trim() ? patch.draftId : undefined,
-      draftTitle:
-        typeof patch.draftTitle === "string" && patch.draftTitle.trim() ? patch.draftTitle.trim() : job.draftTitle,
-      draftBody:
-        patch.draftBody === undefined ? job.draftBody : typeof patch.draftBody === "string" ? patch.draftBody : undefined,
-      platforms: patch.platforms ? normalizePlatforms(patch.platforms) : job.platforms,
-      mode: patch.mode === "dispatch" ? "dispatch" : patch.mode === "dry-run" ? "dry-run" : job.mode,
-      status:
-        typeof patch.status === "string" && STATUS_IDS.has(patch.status as PublishJobStatus)
-          ? (patch.status as PublishJobStatus)
-          : job.status,
-      attempts: typeof patch.attempts === "number" && Number.isFinite(patch.attempts) ? patch.attempts : job.attempts,
-      maxAttempts:
-        typeof patch.maxAttempts === "number" && Number.isFinite(patch.maxAttempts) ? patch.maxAttempts : job.maxAttempts,
-      nextAttemptAt:
-        patch.nextAttemptAt === undefined
-          ? job.nextAttemptAt
-          : typeof patch.nextAttemptAt === "number" && Number.isFinite(patch.nextAttemptAt)
-            ? patch.nextAttemptAt
-            : undefined,
-      resultText:
-        patch.resultText === undefined ? job.resultText : typeof patch.resultText === "string" ? patch.resultText : undefined,
-      results: patch.results !== undefined ? normalizeResults(patch.results) : job.results,
-      updatedAt: now,
-    };
-    return updated;
+  await readModifyWrite<unknown[]>(FILE_NAME, [], (current) => {
+    const jobs = normalizeAll(current);
+    const now = Date.now();
+    const next = jobs.map((job) => {
+      if (job.id !== jobId) return job;
+      updated = {
+        ...job,
+        draftId:
+          patch.draftId === undefined ? job.draftId : typeof patch.draftId === "string" && patch.draftId.trim() ? patch.draftId : undefined,
+        draftTitle:
+          typeof patch.draftTitle === "string" && patch.draftTitle.trim() ? patch.draftTitle.trim() : job.draftTitle,
+        draftBody:
+          patch.draftBody === undefined ? job.draftBody : typeof patch.draftBody === "string" ? patch.draftBody : undefined,
+        platforms: patch.platforms ? normalizePlatforms(patch.platforms) : job.platforms,
+        mode: patch.mode === "dispatch" ? "dispatch" : patch.mode === "dry-run" ? "dry-run" : job.mode,
+        status:
+          typeof patch.status === "string" && STATUS_IDS.has(patch.status as PublishJobStatus)
+            ? (patch.status as PublishJobStatus)
+            : job.status,
+        attempts: typeof patch.attempts === "number" && Number.isFinite(patch.attempts) ? patch.attempts : job.attempts,
+        maxAttempts:
+          typeof patch.maxAttempts === "number" && Number.isFinite(patch.maxAttempts) ? patch.maxAttempts : job.maxAttempts,
+        nextAttemptAt:
+          patch.nextAttemptAt === undefined
+            ? job.nextAttemptAt
+            : typeof patch.nextAttemptAt === "number" && Number.isFinite(patch.nextAttemptAt)
+              ? patch.nextAttemptAt
+              : undefined,
+        resultText:
+          patch.resultText === undefined ? job.resultText : typeof patch.resultText === "string" ? patch.resultText : undefined,
+        results: patch.results !== undefined ? normalizeResults(patch.results) : job.results,
+        updatedAt: now,
+      };
+      return updated;
+    });
+    return next;
   });
-  if (!updated) return null;
-  await writeAll(next);
   return updated;
 }
 
 export async function removePublishJobRecord(jobId: PublishJobId) {
-  const current = await readAll();
-  const next = current.filter((job) => job.id !== jobId);
-  await writeAll(next);
+  await readModifyWrite<unknown[]>(FILE_NAME, [], (current) => {
+    const jobs = normalizeAll(current);
+    return jobs.filter((job) => job.id !== jobId);
+  });
 }

@@ -1,4 +1,4 @@
-import { mkdir, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import type { PublishJobRecord } from "@/lib/publish";
@@ -7,6 +7,32 @@ import { listPublishJobs, updatePublishJobRecord } from "@/lib/server/publish-jo
 import { runPublishDispatch } from "@/lib/server/publish-dispatch";
 
 const LOCK_FILE = path.join(process.cwd(), ".openclaw-data", "publish-queue.lock");
+const STALE_LOCK_MS = 5 * 60 * 1000; // 5 minutes
+
+function isProcessAlive(pid: number) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function clearStaleLock() {
+  try {
+    const content = await readFile(LOCK_FILE, "utf8");
+    const pid = Number(content.trim());
+    if (!Number.isFinite(pid) || pid <= 0) {
+      await unlink(LOCK_FILE).catch(() => null);
+      return;
+    }
+    if (!isProcessAlive(pid)) {
+      await unlink(LOCK_FILE).catch(() => null);
+    }
+  } catch {
+    // lock file doesn't exist or can't be read — nothing to clear
+  }
+}
 
 async function tryAcquireLock() {
   try {
@@ -14,7 +40,14 @@ async function tryAcquireLock() {
     await writeFile(LOCK_FILE, String(process.pid), { encoding: "utf8", flag: "wx" });
     return true;
   } catch {
-    return false;
+    // Could not acquire — check for stale lock and retry once
+    await clearStaleLock();
+    try {
+      await writeFile(LOCK_FILE, String(process.pid), { encoding: "utf8", flag: "wx" });
+      return true;
+    } catch {
+      return false;
+    }
   }
 }
 

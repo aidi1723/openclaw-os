@@ -4,6 +4,11 @@ import { removePublishJobRecord, updatePublishJobRecord } from "@/lib/server/pub
 import type { PublishJobRecord } from "@/lib/publish";
 
 export const runtime = "nodejs";
+export const dynamicParams = false;
+
+export function generateStaticParams() {
+  return [];
+}
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ jobId: string }> }) {
   try {

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 
+import { buildAgentCoreApiUrl } from "@/lib/app-api";
 import { refreshPublishJobs } from "@/lib/publish";
 
 export function PublishQueueRunner() {
@@ -13,7 +14,10 @@ export function PublishQueueRunner() {
 
     const syncCapability = async () => {
       try {
-        const res = await fetch("/api/publish/queue/run", { method: "GET", cache: "no-store" });
+        const res = await fetch(buildAgentCoreApiUrl("/api/publish/queue/run"), {
+          method: "GET",
+          cache: "no-store",
+        });
         const data = (await res.json().catch(() => null)) as null | { data?: { authRequired?: boolean } };
         browserTriggerEnabledRef.current = !Boolean(data?.data?.authRequired);
       } catch {
@@ -26,7 +30,7 @@ export function PublishQueueRunner() {
       processingRef.current = true;
       try {
         if (browserTriggerEnabledRef.current) {
-          await fetch("/api/publish/queue/run", {
+          await fetch(buildAgentCoreApiUrl("/api/publish/queue/run"), {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             cache: "no-store",
@@ -40,7 +44,7 @@ export function PublishQueueRunner() {
 
     const intervalId = window.setInterval(() => {
       void runOnce();
-    }, 1500);
+    }, 8000);
     const onWake = () => {
       void runOnce();
     };

@@ -1,5 +1,5 @@
 [Unit]
-Description=OpenClaw publish queue worker
+Description=AgentCore publish queue worker
 After=network.target
 
 [Service]

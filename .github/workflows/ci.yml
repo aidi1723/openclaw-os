@@ -7,7 +7,7 @@ on:
     branches: [main]
 
 jobs:
-  build:
+  web-build:
     runs-on: ubuntu-latest
 
     steps:
@@ -28,3 +28,59 @@ jobs:
 
       - name: Build
         run: npm run build
+
+  windows-desktop-preflight:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install sidecar build dependencies
+        shell: pwsh
+        run: |
+          python -m venv lobster-sidecar/.venv
+          .\lobster-sidecar\.venv\Scripts\python -m pip install --upgrade pip
+          .\lobster-sidecar\.venv\Scripts\python -m pip install -r lobster-sidecar\requirements.txt PyInstaller
+
+      - name: Runtime doctor
+        run: npm run runtime:doctor
+
+      - name: Build desktop web
+        run: npm run build:desktop-web
+
+      - name: Prepare sidecar
+        run: npm run desktop:prepare-sidecar
+
+      - name: Cargo check
+        run: cargo check --manifest-path src-tauri/Cargo.toml
+
+      - name: Sidecar smoke test
+        run: npm run desktop:smoke-test-sidecar
+
+      - name: Build Windows desktop package
+        run: npm run desktop:package
+
+      - name: Upload Windows NSIS bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: agentcore-os-windows-nsis
+          path: src-tauri/target/release/bundle/nsis/*.exe
+          if-no-files-found: error

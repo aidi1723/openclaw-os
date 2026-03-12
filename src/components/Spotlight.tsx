@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { requestOpenClawAgent } from "@/lib/openclaw-agent-client";
 import { createTask, updateTask, type TaskId } from "@/lib/tasks";
 
 type SpotlightApp = { id: string; name: string };
@@ -133,11 +134,11 @@ export function Spotlight({
     });
   };
 
-  const clearHistory = () => {
+  const clearHistory = useCallback(() => {
     setHistory([]);
     saveHistory([]);
     setResult("已清空 Spotlight 记录。");
-  };
+  }, []);
 
   const run = async (rawMessage?: string) => {
     const message = (rawMessage ?? value).trim().replace(/^>\s*/, "");
@@ -166,25 +167,10 @@ export function Spotlight({
     pushHistory({ kind: "command", text: message });
 
     try {
-      const res = await fetch("/api/openclaw/agent", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message, sessionId: "webos-spotlight" }),
+      const text = await requestOpenClawAgent({
+        message,
+        sessionId: "webos-spotlight",
       });
-      const data = (await res.json().catch(() => null)) as
-        | null
-        | { ok?: boolean; text?: string; error?: string };
-
-      if (!res.ok || !data?.ok) {
-        const error = data?.error || "执行失败，请检查 OpenClaw 是否运行";
-        setResult(error);
-        if (taskIdRef.current) {
-          updateTask(taskIdRef.current, { status: "error", detail: error });
-        }
-        return;
-      }
-
-      const text = String(data.text ?? "").trim();
       setResult(text || "（无输出）");
       if (taskIdRef.current) updateTask(taskIdRef.current, { status: "done" });
     } catch (err) {
@@ -315,7 +301,7 @@ export function Spotlight({
     }
 
     return list;
-  }, [apps, history, value]);
+  }, [apps, clearHistory, history, value]);
 
   useEffect(() => {
     if (!open) return;

@@ -1,5 +1,5 @@
 [Unit]
-Description=Trigger OpenClaw publish queue once
+Description=Trigger AgentCore publish queue once
 After=network.target
 
 [Service]

@@ -6,6 +6,7 @@ import type { AppWindowProps } from "@/apps/types";
 import { AppToast } from "@/components/AppToast";
 import { AppWindowShell } from "@/components/windows/AppWindowShell";
 import { useTimedToast } from "@/hooks/useTimedToast";
+import { buildAgentCoreApiUrl } from "@/lib/app-api";
 import { getOutputLanguageInstruction } from "@/lib/language";
 import { getActiveLlmConfig, loadSettings } from "@/lib/settings";
 import { createTask, updateTask, type TaskId } from "@/lib/tasks";
@@ -137,12 +138,18 @@ export function MediaOpsAppWindow({
 
     try {
       // 1) Primary: OpenClaw (stable CLI integration)
-      const openclawRes = await fetch("/api/openclaw/copy", {
+      const openclawRes = await fetch(buildAgentCoreApiUrl("/api/openclaw/copy"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           style: platform,
           topic: content,
+          llm: {
+            provider: active.id,
+            apiKey,
+            baseUrl,
+            model,
+          },
         }),
       });
       const openclawData = (await openclawRes.json().catch(() => null)) as
@@ -160,7 +167,7 @@ export function MediaOpsAppWindow({
       if (hasDirectLlm) {
         resetStreamBuffer();
         const systemPrompt = `${systemPromptByPlatform[platform]}\n${getOutputLanguageInstruction()}`;
-        const res = await fetch("/api/llm/chat", {
+        const res = await fetch(buildAgentCoreApiUrl("/api/llm/chat"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -240,7 +247,7 @@ export function MediaOpsAppWindow({
       }
 
       // 3) Last resort: local template generator (pure WebOS)
-      const fallback = await fetch("/api/copy/generate", {
+      const fallback = await fetch(buildAgentCoreApiUrl("/api/copy/generate"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ style: platform, topic: content }),

@@ -126,7 +126,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (req.method === "GET" && url.pathname === "/health") {
-    return json(res, 200, { ok: true, name: "openclaw-os-webhook-connector", time: nowIso() });
+    return json(res, 200, { ok: true, name: "agentcore-os-webhook-connector", time: nowIso() });
   }
 
   if (req.method === "GET" && url.pathname === "/jobs") {

@@ -1,10 +1,12 @@
 export function getJsonFromStorage<T>(
   key: string,
   fallback: T,
-  storage: Storage = window.localStorage,
+  storage?: Storage,
 ): T {
+  if (!storage && typeof window === "undefined") return fallback;
   try {
-    const raw = storage.getItem(key);
+    const resolvedStorage = storage ?? window.localStorage;
+    const raw = resolvedStorage.getItem(key);
     if (!raw) return fallback;
     return JSON.parse(raw) as T;
   } catch {
@@ -15,8 +17,9 @@ export function getJsonFromStorage<T>(
 export function setJsonToStorage<T>(
   key: string,
   value: T,
-  storage: Storage = window.localStorage,
+  storage?: Storage,
 ) {
-  storage.setItem(key, JSON.stringify(value));
+  if (!storage && typeof window === "undefined") return;
+  const resolvedStorage = storage ?? window.localStorage;
+  resolvedStorage.setItem(key, JSON.stringify(value));
 }
-

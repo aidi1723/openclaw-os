@@ -3,6 +3,11 @@ import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 
 export const runtime = "nodejs";
+export const dynamicParams = false;
+
+export function generateStaticParams() {
+  return [];
+}
 
 function contentTypeFor(name: string) {
   if (name.endsWith(".mp4")) return "video/mp4";
@@ -20,7 +25,7 @@ export async function GET(
     return NextResponse.json({ ok: false, error: "非法文件名" }, { status: 400 });
   }
 
-  const root = path.join("/tmp", "openclaw-os", "outputs");
+  const root = path.join("/tmp", "agentcore-os", "outputs");
   const fullPath = path.join(root, name);
 
   try {

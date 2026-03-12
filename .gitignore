@@ -3,6 +3,8 @@ node_modules/
 .next-dev/
 dist/
 build/
+out/
+.cache/
 
 # Logs
 npm-debug.log*
@@ -22,3 +24,16 @@ pnpm-debug.log*
 # Env
 .env
 .env.*
+
+# Desktop runtime artifacts
+lobster-sidecar/.venv/
+lobster-sidecar/build/
+lobster-sidecar/dist/
+lobster-sidecar/__pycache__/
+*.pyc
+.tmp-runtime-check/
+lobster-src/
+tsconfig.tsbuildinfo
+src-tauri/target/
+src-tauri/binaries/*
+!src-tauri/binaries/.gitkeep

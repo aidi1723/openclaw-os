@@ -3,7 +3,7 @@
 <plist version="1.0">
   <dict>
     <key>Label</key>
-    <string>com.openclaw.publish-queue-worker</string>
+    <string>com.agentcore.publish-queue-worker</string>
 
     <key>WorkingDirectory</key>
     <string>__OPENCLAW_APP_DIR__</string>
@@ -35,9 +35,9 @@
     <true/>
 
     <key>StandardOutPath</key>
-    <string>__OPENCLAW_LOG_DIR__/openclaw-publish-queue-worker.log</string>
+    <string>__OPENCLAW_LOG_DIR__/agentcore-publish-queue-worker.log</string>
 
     <key>StandardErrorPath</key>
-    <string>__OPENCLAW_LOG_DIR__/openclaw-publish-queue-worker.error.log</string>
+    <string>__OPENCLAW_LOG_DIR__/agentcore-publish-queue-worker.error.log</string>
   </dict>
 </plist>

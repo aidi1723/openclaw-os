@@ -19,6 +19,20 @@ npm run dev
 
 Open `http://localhost:3000/`.
 
+## Desktop build track
+
+If you are validating the desktop shell instead of the browser-only app, use:
+
+```bash
+npm run desktop:build-doctor
+npm run runtime:doctor
+npm run desktop:prepare-sidecar
+npm run desktop:smoke-test-sidecar
+npm run desktop:package
+```
+
+For Windows packaging status and clean-machine validation criteria, see [Windows Desktop Testing](WINDOWS_DESKTOP_TESTING.md).
+
 ## Keyboard shortcuts
 
 - `⌘K` / `Ctrl+K`: toggle Spotlight

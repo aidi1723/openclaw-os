@@ -1,0 +1,54 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "AgentCore OS",
+  "version": "0.1.0",
+  "identifier": "com.agentcore.os",
+  "build": {
+    "beforeBuildCommand": "npm run build:desktop-web",
+    "beforeDevCommand": "npm run dev",
+    "frontendDist": "../out",
+    "devUrl": "http://127.0.0.1:3000"
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "macOS": {
+      "minimumSystemVersion": "11.0"
+    },
+    "windows": {
+      "webviewInstallMode": {
+        "type": "offlineInstaller"
+      },
+      "nsis": {
+        "displayLanguageSelector": true
+      }
+    },
+    "externalBin": [
+      "binaries/lobster_engine"
+    ],
+    "resources": [
+      "sidecars/*",
+      "../deploy/desktop-runtime/**/*",
+      "../deploy/desktop-runtime/.env.agentcore-runtime.example"
+    ]
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "AgentCore OS",
+        "width": 1480,
+        "height": 980,
+        "minWidth": 1200,
+        "minHeight": 760,
+        "resizable": true
+      }
+    ]
+  }
+}

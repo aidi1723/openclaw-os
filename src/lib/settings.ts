@@ -2,7 +2,15 @@ import type { AppId } from "@/apps/types";
 import type { WorkspaceIndustryId } from "@/lib/workspace-presets";
 import { getJsonFromStorage, setJsonToStorage } from "@/lib/storage";
 
-export type LlmProviderId = "kimi" | "deepseek" | "openai" | "qwen";
+declare global {
+  interface Window {
+    __AGENTCORE_API_BASE_URL__?: string;
+    __AGENTCORE_BOOTSTRAP_SETTINGS__?: Partial<AppSettings> | null;
+    __AGENTCORE_DESKTOP_SHELL__?: boolean;
+  }
+}
+
+export type LlmProviderId = "kimi" | "deepseek" | "openai" | "anthropic" | "qwen";
 
 export type LlmProviderConfig = {
   apiKey: string;
@@ -22,6 +30,24 @@ export type AssistantSettings = {
 export type OpenClawEngineSettings = {
   baseUrl: string;
   apiToken: string;
+};
+
+export type DesktopRuntimeProfile = "desktop_light" | "desktop_dify";
+export type DesktopRuntimeOrchestration = "none" | "docker_compose";
+export type DesktopRuntimeShell = "browser" | "tauri";
+
+export type DesktopRuntimeSettings = {
+  shell: DesktopRuntimeShell;
+  llmStrategy: "api_only";
+  profile: DesktopRuntimeProfile;
+  orchestration: DesktopRuntimeOrchestration;
+  composeProjectName: string;
+  localAppUrl: string;
+  localRuntimeUrl: string;
+  sidecarApiUrl: string;
+  difyBaseUrl: string;
+  autoBootLocalStack: boolean;
+  detectDockerOnLaunch: boolean;
 };
 
 export type MatrixAccountsSettings = {
@@ -49,6 +75,7 @@ export type AppSettings = {
   llm: LlmLibrarySettings;
   assistant: AssistantSettings;
   openclaw: OpenClawEngineSettings;
+  runtime: DesktopRuntimeSettings;
   matrixAccounts: MatrixAccountsSettings;
   personalization: PersonalizationSettings;
 };
@@ -72,6 +99,11 @@ export const defaultSettings: AppSettings = {
         baseUrl: "https://api.openai.com/v1",
         model: "gpt-4o-mini",
       },
+      anthropic: {
+        apiKey: "",
+        baseUrl: "https://api.anthropic.com",
+        model: "claude-3-5-sonnet-latest",
+      },
       qwen: {
         apiKey: "",
         baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
@@ -86,6 +118,19 @@ export const defaultSettings: AppSettings = {
     // Leave empty by default: local-first. Creative Studio can fallback to local video-frames (ffmpeg).
     baseUrl: "",
     apiToken: "",
+  },
+  runtime: {
+    shell: "browser",
+    llmStrategy: "api_only",
+    profile: "desktop_light",
+    orchestration: "none",
+    composeProjectName: "agentcore-runtime",
+    localAppUrl: "http://127.0.0.1:3000",
+    localRuntimeUrl: "http://127.0.0.1:18789",
+    sidecarApiUrl: "http://127.0.0.1:8080",
+    difyBaseUrl: "http://127.0.0.1:5001",
+    autoBootLocalStack: false,
+    detectDockerOnLaunch: true,
   },
   matrixAccounts: {
     xiaohongshu: { token: "", webhookUrl: "" },
@@ -178,12 +223,14 @@ export function normalizeMatrixAccountsSettings(
   return result;
 }
 
+type LegacySettings = Partial<AppSettings> & {
+  kimi?: { apiKey?: string; baseUrl?: string; model?: string };
+};
+
 function mergeSettings(saved: Partial<AppSettings> | null | undefined): AppSettings {
-  const savedAny = saved as any;
-  const legacyKimi = savedAny?.kimi as
-    | undefined
-    | { apiKey?: string; baseUrl?: string; model?: string };
-  const llmFromSaved = (saved as any)?.llm as Partial<LlmLibrarySettings> | undefined;
+  const savedLegacy = (saved ?? {}) as LegacySettings;
+  const legacyKimi = savedLegacy.kimi;
+  const llmFromSaved = savedLegacy.llm as Partial<LlmLibrarySettings> | undefined;
 
   const llmMerged: LlmLibrarySettings = {
     ...defaultSettings.llm,
@@ -198,7 +245,9 @@ function mergeSettings(saved: Partial<AppSettings> | null | undefined): AppSetti
   if (legacyKimi && (!llmFromSaved || !llmFromSaved.providers?.kimi)) {
     llmMerged.providers.kimi = {
       ...llmMerged.providers.kimi,
-      ...(legacyKimi as any),
+      apiKey: typeof legacyKimi.apiKey === "string" ? legacyKimi.apiKey : llmMerged.providers.kimi.apiKey,
+      baseUrl: typeof legacyKimi.baseUrl === "string" ? legacyKimi.baseUrl : llmMerged.providers.kimi.baseUrl,
+      model: typeof legacyKimi.model === "string" ? legacyKimi.model : llmMerged.providers.kimi.model,
     };
   }
 
@@ -224,6 +273,7 @@ function mergeSettings(saved: Partial<AppSettings> | null | undefined): AppSetti
       }
       return merged;
     })(),
+    runtime: { ...defaultSettings.runtime, ...(saved?.runtime ?? {}) },
     matrixAccounts: normalizeMatrixAccountsSettings(saved?.matrixAccounts),
     personalization: {
       ...defaultSettings.personalization,
@@ -234,7 +284,34 @@ function mergeSettings(saved: Partial<AppSettings> | null | undefined): AppSetti
   };
 }
 
+function isDesktopShell() {
+  if (typeof window === "undefined") return false;
+  return Boolean(window.__AGENTCORE_DESKTOP_SHELL__);
+}
+
+function getDesktopApiBaseUrl() {
+  if (typeof window === "undefined") return "";
+  return String(window.__AGENTCORE_API_BASE_URL__ || "").trim().replace(/\/+$/, "");
+}
+
+function getBootstrapSettings() {
+  if (typeof window === "undefined") return null;
+  const value = window.__AGENTCORE_BOOTSTRAP_SETTINGS__;
+  return value && typeof value === "object" ? value : null;
+}
+
+function buildDesktopSettingsPayload(next: AppSettings) {
+  return {
+    ...next,
+    matrixAccounts: defaultSettings.matrixAccounts,
+  };
+}
+
 export function loadSettings(): AppSettings {
+  const bootstrap = getBootstrapSettings();
+  if (bootstrap) {
+    return mergeSettings(bootstrap);
+  }
   const saved = getJsonFromStorage<Partial<AppSettings>>(
     SETTINGS_KEY,
     defaultSettings,
@@ -243,6 +320,7 @@ export function loadSettings(): AppSettings {
 }
 
 export function hasSavedSettings() {
+  if (getBootstrapSettings()) return true;
   if (typeof window === "undefined") return false;
   try {
     return Boolean(window.localStorage.getItem(SETTINGS_KEY));
@@ -252,14 +330,51 @@ export function hasSavedSettings() {
 }
 
 export function saveSettings(next: AppSettings) {
-  setJsonToStorage(SETTINGS_KEY, {
-    ...next,
-    // Publish credentials move to the server-backed store and should not be
-    // re-persisted into browser localStorage.
-    matrixAccounts: defaultSettings.matrixAccounts,
-  });
+  const payload = buildDesktopSettingsPayload(next);
+  setJsonToStorage(SETTINGS_KEY, payload);
   if (typeof window !== "undefined") {
+    window.__AGENTCORE_BOOTSTRAP_SETTINGS__ = payload;
+    if (isDesktopShell()) {
+      const apiBase = getDesktopApiBaseUrl();
+      if (apiBase) {
+        void fetch(`${apiBase}/api/desktop/settings`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }).catch(() => null);
+      }
+    }
     window.dispatchEvent(new Event("openclaw:settings"));
+  }
+}
+
+export async function hydrateSettingsFromDesktopBridge() {
+  if (!isDesktopShell()) return null;
+
+  const apiBase = getDesktopApiBaseUrl();
+  if (!apiBase) return null;
+
+  try {
+    const response = await fetch(`${apiBase}/api/desktop/settings`, {
+      method: "GET",
+      cache: "no-store",
+    });
+    const data = (await response.json().catch(() => null)) as
+      | null
+      | { ok?: boolean; data?: { settings?: Partial<AppSettings> | null } };
+    const settings = data?.data?.settings;
+    if (!response.ok || !data?.ok || !settings || typeof settings !== "object") {
+      return null;
+    }
+
+    const merged = mergeSettings(settings);
+    const payload = buildDesktopSettingsPayload(merged);
+    window.__AGENTCORE_BOOTSTRAP_SETTINGS__ = payload;
+    setJsonToStorage(SETTINGS_KEY, payload);
+    window.dispatchEvent(new Event("openclaw:settings"));
+    return merged;
+  } catch {
+    return null;
   }
 }
 

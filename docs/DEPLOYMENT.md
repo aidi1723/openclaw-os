@@ -118,8 +118,8 @@ When this env var is present:
 
 Template reference:
 
-- copy values from [`.env.example`](/Users/aidi/agent桌面/agentcore-os/.env.example)
-- edit deploy templates in [`deploy/`](/Users/aidi/agent桌面/agentcore-os/deploy)
+- copy values from [`.env.example`](../.env.example)
+- edit deploy templates in [`deploy/`](../deploy)
 
 ## Quick production start
 
@@ -177,7 +177,7 @@ If you need faster pickup, call it every 15 or 30 seconds using your platform sc
 
 Example file:
 
-- [`deploy/pm2/ecosystem.config.cjs`](/Users/aidi/agent桌面/agentcore-os/deploy/pm2/ecosystem.config.cjs)
+- [`deploy/pm2/ecosystem.config.cjs`](../deploy/pm2/ecosystem.config.cjs)
 
 Run:
 
@@ -191,15 +191,15 @@ This template runs:
 - the Next.js app
 - the publish queue worker
 
-Before running it, replace placeholders described in [`deploy/README.md`](/Users/aidi/agent桌面/agentcore-os/deploy/README.md).
+Before running it, replace placeholders described in [`deploy/README.md`](../deploy/README.md).
 
 ## 4. systemd
 
 Example files:
 
-- [`deploy/systemd/openclaw-publish-queue-worker.service`](/Users/aidi/agent桌面/agentcore-os/deploy/systemd/openclaw-publish-queue-worker.service)
-- [`deploy/systemd/openclaw-publish-queue-trigger.service`](/Users/aidi/agent桌面/agentcore-os/deploy/systemd/openclaw-publish-queue-trigger.service)
-- [`deploy/systemd/openclaw-publish-queue-worker.timer`](/Users/aidi/agent桌面/agentcore-os/deploy/systemd/openclaw-publish-queue-worker.timer)
+- [`deploy/systemd/agentcore-publish-queue-worker.service`](../deploy/systemd/agentcore-publish-queue-worker.service)
+- [`deploy/systemd/agentcore-publish-queue-trigger.service`](../deploy/systemd/agentcore-publish-queue-trigger.service)
+- [`deploy/systemd/agentcore-publish-queue-worker.timer`](../deploy/systemd/agentcore-publish-queue-worker.timer)
 
 Two common patterns:
 
@@ -212,19 +212,19 @@ This repository includes the continuous worker example by default.
 
 Example file:
 
-- [`deploy/launchd/com.openclaw.publish-queue-worker.plist`](/Users/aidi/agent桌面/agentcore-os/deploy/launchd/com.openclaw.publish-queue-worker.plist)
+- [`deploy/launchd/com.agentcore.publish-queue-worker.plist`](../deploy/launchd/com.agentcore.publish-queue-worker.plist)
 
 Load it:
 
 ```bash
-launchctl load ~/Library/LaunchAgents/com.openclaw.publish-queue-worker.plist
-launchctl start com.openclaw.publish-queue-worker
+launchctl load ~/Library/LaunchAgents/com.agentcore.publish-queue-worker.plist
+launchctl start com.agentcore.publish-queue-worker
 ```
 
 ## Template cleanup before use
 
-The example files in [`deploy/`](/Users/aidi/agent桌面/agentcore-os/deploy) now use placeholders on purpose.
-Replace them exactly as described in [`deploy/README.md`](/Users/aidi/agent桌面/agentcore-os/deploy/README.md).
+The example files in [`deploy/`](../deploy) now use placeholders on purpose.
+Replace them exactly as described in [`deploy/README.md`](../deploy/README.md).
 
 ## Vercel notes
 

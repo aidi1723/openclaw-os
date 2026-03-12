@@ -2,16 +2,23 @@
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
+  AlertTriangle,
   Bot,
+  CheckCircle2,
   Cpu,
   KeyRound,
   Palette,
+  RefreshCw,
   Settings as SettingsIcon,
+  Smartphone,
   ShieldCheck,
 } from "lucide-react";
 import type { AppId, AppWindowProps } from "@/apps/types";
 import { AppToast } from "@/components/AppToast";
 import { AppWindowShell } from "@/components/windows/AppWindowShell";
+import { useRuntimeDoctorReport } from "@/hooks/useRuntimeDoctorReport";
+import { useImBridge } from "@/hooks/useImBridge";
+import { useRuntimeSidecar } from "@/hooks/useRuntimeSidecar";
 import { useTimedToast } from "@/hooks/useTimedToast";
 import {
   getPublishConfig,
@@ -24,15 +31,22 @@ import {
   getAppDisplayName,
   getCategoryLabel,
 } from "@/lib/app-display";
+import { buildAgentCoreApiUrl } from "@/lib/app-api";
+import {
+  getDesktopRuntimeStatusSummary,
+  getRuntimeBridgeConfig,
+} from "@/lib/desktop-runtime";
 import { getAssistantPromptHint } from "@/lib/language";
 import type { AppSettings } from "@/lib/settings";
 import {
   defaultSettings,
   getActiveLlmConfig,
+  hydrateSettingsFromDesktopBridge,
   loadSettings,
   saveSettings,
   type LlmProviderId,
 } from "@/lib/settings";
+import type { ImBridgeProviderId } from "@/lib/im-bridge";
 import type { SettingsTargetTab } from "@/lib/ui-events";
 import {
   getWorkspaceScenario,
@@ -40,11 +54,16 @@ import {
   workspaceIndustries,
 } from "@/lib/workspace-presets";
 
-type TabId = "llm" | "engine" | "matrix" | "personalization";
+type TabId = "llm" | "engine" | "remote" | "matrix" | "personalization";
 
 const tabs: Array<{ id: TabId; label: string; icon: ReactNode }> = [
   { id: "llm", label: "大模型与助手", icon: <Bot className="h-4 w-4" /> },
   { id: "engine", label: "引擎核心", icon: <Cpu className="h-4 w-4" /> },
+  {
+    id: "remote",
+    label: "移动端接入",
+    icon: <Smartphone className="h-4 w-4" />,
+  },
   {
     id: "matrix",
     label: "矩阵账号授权",
@@ -71,6 +90,27 @@ function statusDotClass(connected: boolean) {
   return connected ? "bg-emerald-500" : "bg-gray-300";
 }
 
+function getImEventStatusMeta(status: string) {
+  switch (status) {
+    case "completed":
+      return { label: "已完成", className: "bg-emerald-100 text-emerald-700" };
+    case "failed":
+      return { label: "失败", className: "bg-rose-100 text-rose-700" };
+    case "ignored":
+      return { label: "已忽略", className: "bg-gray-100 text-gray-600" };
+    case "unauthorized":
+      return { label: "未授权", className: "bg-amber-100 text-amber-700" };
+    case "disabled":
+      return { label: "未启用", className: "bg-gray-100 text-gray-600" };
+    case "blocked":
+      return { label: "待配置", className: "bg-sky-100 text-sky-700" };
+    case "invalid":
+      return { label: "无效", className: "bg-amber-100 text-amber-700" };
+    default:
+      return { label: status, className: "bg-gray-100 text-gray-600" };
+  }
+}
+
 export function SettingsAppWindow({
   state,
   zIndex,
@@ -82,6 +122,7 @@ export function SettingsAppWindow({
   const [activeTab, setActiveTab] = useState<TabId>("llm");
   const [form, setForm] = useState<AppSettings>(() => defaultSettings);
   const [savedAt, setSavedAt] = useState<number | null>(null);
+  const [expandedImEventId, setExpandedImEventId] = useState<string | null>(null);
 
   const [isTestingLlm, setIsTestingLlm] = useState(false);
   const [isTestingEngine, setIsTestingEngine] = useState(false);
@@ -92,12 +133,17 @@ export function SettingsAppWindow({
     tiktok: false,
     storefront: false,
   });
+  const isWindowVisible = state === "open" || state === "opening";
 
   const { toast, showToast } = useTimedToast(2000);
+  const {
+    report: runtimeDoctor,
+    loading: runtimeDoctorLoading,
+    error: runtimeDoctorError,
+    refresh: refreshRuntimeDoctor,
+  } = useRuntimeDoctorReport(isWindowVisible && activeTab === "engine");
   const autosaveTimerRef = useRef<number | null>(null);
   const hydratedRef = useRef(false);
-
-  const isWindowVisible = state === "open" || state === "opening";
 
   const flushSaveNow = () => {
     if (!isWindowVisible) return;
@@ -115,6 +161,10 @@ export function SettingsAppWindow({
       setForm(loadSettings());
       setSavedAt(null);
       hydratedRef.current = true;
+      void hydrateSettingsFromDesktopBridge().then((hydrated) => {
+        if (!hydrated) return;
+        setForm(hydrated);
+      });
       void refreshPublishConfig().then((matrixAccounts) => {
         setForm((prev) => ({ ...prev, matrixAccounts }));
       });
@@ -171,6 +221,7 @@ export function SettingsAppWindow({
         { id: "kimi" as const, name: "Kimi (Moonshot)", badge: "推荐" },
         { id: "deepseek" as const, name: "DeepSeek", badge: "高速" },
         { id: "openai" as const, name: "OpenAI", badge: "通用" },
+        { id: "anthropic" as const, name: "Claude (Anthropic)", badge: "高级" },
         { id: "qwen" as const, name: "通义千问", badge: "国产" },
       ] as const,
     [],
@@ -219,6 +270,37 @@ export function SettingsAppWindow({
     () => getWorkspaceScenario(form.personalization.activeScenarioId),
     [form.personalization.activeScenarioId],
   );
+  const runtimeSummary = useMemo(
+    () => getDesktopRuntimeStatusSummary(form, runtimeDoctor),
+    [form, runtimeDoctor],
+  );
+  const runtimeBridgeConfig = useMemo(() => getRuntimeBridgeConfig(form), [form]);
+  const {
+    status: sidecarStatus,
+    loading: sidecarLoading,
+    actionLoading: sidecarActionLoading,
+    error: sidecarError,
+    refresh: refreshSidecarStatus,
+    sync: syncSidecarConfig,
+    boot: bootSidecar,
+    stop: stopSidecar,
+  } = useRuntimeSidecar(runtimeBridgeConfig, isWindowVisible && activeTab === "engine");
+  const {
+    config: imBridgeConfig,
+    setConfig: setImBridgeConfig,
+    health: imBridgeHealth,
+    events: imBridgeEvents,
+    loading: imBridgeLoading,
+    saving: imBridgeSaving,
+    testing: imBridgeTesting,
+    clearing: imBridgeClearing,
+    retryingEventId,
+    error: imBridgeError,
+    save: saveImBridgeConfig,
+    test: testImBridgeConfig,
+    clearEvents: clearImBridgeEvents,
+    retryEvent: retryImBridgeEvent,
+  } = useImBridge(isWindowVisible && activeTab === "remote");
 
   const appGroups = useMemo(() => {
     const grouped = new Map<string, typeof appCatalog>();
@@ -229,6 +311,90 @@ export function SettingsAppWindow({
     }
     return Array.from(grouped.entries());
   }, []);
+  const imProviders = useMemo(
+    () =>
+      [
+        {
+          id: "generic" as const,
+          name: "通用 Webhook",
+          desc: "适合通过钉钉/飞书自动化把消息转发成标准 HTTP 请求。",
+        },
+        {
+          id: "feishu" as const,
+          name: "飞书",
+          desc: "使用飞书机器人或流程自动化，把消息转发到 AgentCore IM Bridge。",
+        },
+        {
+          id: "dingtalk" as const,
+          name: "钉钉",
+          desc: "使用钉钉机器人或自动化流程，把指令转发到桌面侧回调。",
+        },
+      ] as const,
+    [],
+  );
+  const imCommandExample = useMemo(() => {
+    const prefix = imBridgeConfig.commandPrefix.trim();
+    const command = "帮我分析本周销售数据，并生成一份工作汇报提纲。";
+    return prefix ? `${prefix} ${command}` : command;
+  }, [imBridgeConfig.commandPrefix]);
+  const imBridgeExamples = useMemo(() => {
+    const callbackUrls = imBridgeHealth?.callbackUrls ?? {
+      generic: "https://your-tunnel.example.com/api/im-bridge/inbound/generic",
+      feishu: "https://your-tunnel.example.com/api/im-bridge/inbound/feishu",
+      dingtalk: "https://your-tunnel.example.com/api/im-bridge/inbound/dingtalk",
+    };
+    const tokenHint = "<Access Token>";
+    return {
+      generic: {
+        callbackUrl: callbackUrls.generic,
+        auth: imBridgeHealth?.authModes?.bearerHeader ?? `Authorization: Bearer ${tokenHint}`,
+        body: JSON.stringify(
+          {
+            text: imCommandExample,
+            sessionId: "mobile-demo-user",
+          },
+          null,
+          2,
+        ),
+      },
+      feishu: {
+        callbackUrl: callbackUrls.feishu,
+        auth: imBridgeHealth?.authModes?.customHeader ?? `X-AgentCore-IM-Token: ${tokenHint}`,
+        body: JSON.stringify(
+          {
+            event: {
+              sender: {
+                sender_id: {
+                  open_id: "ou_mobile_demo",
+                },
+              },
+              message: {
+                chat_id: "oc_mobile_demo",
+                content: JSON.stringify({ text: imCommandExample }),
+              },
+            },
+          },
+          null,
+          2,
+        ),
+      },
+      dingtalk: {
+        callbackUrl: callbackUrls.dingtalk,
+        auth: imBridgeHealth?.authModes?.queryParam ?? `?token=${tokenHint}`,
+        body: JSON.stringify(
+          {
+            conversationId: "cid_mobile_demo",
+            senderStaffId: "staff_mobile_demo",
+            text: {
+              content: imCommandExample,
+            },
+          },
+          null,
+          2,
+        ),
+      },
+    };
+  }, [imBridgeHealth, imCommandExample]);
 
   const applyWorkspaceScenario = (scenarioId: string) => {
     const scenario = getWorkspaceScenario(scenarioId);
@@ -245,6 +411,35 @@ export function SettingsAppWindow({
       },
     }));
     showToast(`已切换到场景：${scenario.title}`, "ok");
+  };
+
+  const applyRuntimeProfile = (profile: "desktop_light" | "desktop_dify") => {
+    setForm((prev) => ({
+      ...prev,
+      runtime: {
+        ...prev.runtime,
+        profile,
+        orchestration: profile === "desktop_dify" ? "docker_compose" : "none",
+        autoBootLocalStack: profile === "desktop_dify",
+      },
+    }));
+  };
+
+  const handleSyncRuntimeBridge = async () => {
+    const result = await syncSidecarConfig();
+    showToast(result.message, result.ok ? "ok" : "error");
+  };
+
+  const handleBootRuntimeSidecar = async () => {
+    const result = await bootSidecar();
+    showToast(result.message, result.ok ? "ok" : "error");
+    refreshSidecarStatus();
+  };
+
+  const handleStopRuntimeSidecar = async () => {
+    const result = await stopSidecar();
+    showToast(result.message, result.ok ? "ok" : "error");
+    refreshSidecarStatus();
   };
 
   const toggleDesktopApp = (appId: AppId) => {
@@ -290,7 +485,7 @@ export function SettingsAppWindow({
 
     setIsTestingLlm(true);
     try {
-      const res = await fetch("/api/llm/test", {
+      const res = await fetch(buildAgentCoreApiUrl("/api/llm/test"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -329,7 +524,7 @@ export function SettingsAppWindow({
 
     setIsTestingEngine(true);
     try {
-      const res = await fetch("/api/openclaw/test", {
+      const res = await fetch(buildAgentCoreApiUrl("/api/openclaw/test"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -366,6 +561,26 @@ export function SettingsAppWindow({
     } finally {
       setMatrixSaving((prev) => ({ ...prev, [appId]: false }));
     }
+  };
+
+  const handleSaveImBridge = async () => {
+    const result = await saveImBridgeConfig(imBridgeConfig);
+    showToast(result.message, result.ok ? "ok" : "error");
+  };
+
+  const handleTestImBridge = async (provider?: ImBridgeProviderId) => {
+    const result = await testImBridgeConfig(provider);
+    showToast(result.message, result.ok ? "ok" : "error");
+  };
+
+  const handleClearImBridgeEvents = async () => {
+    const result = await clearImBridgeEvents();
+    showToast(result.message, result.ok ? "ok" : "error");
+  };
+
+  const handleRetryImBridgeEvent = async (eventId: string) => {
+    const result = await retryImBridgeEvent(eventId);
+    showToast(result.message, result.ok ? "ok" : "error");
   };
 
   return (
@@ -623,11 +838,340 @@ export function SettingsAppWindow({
                 <div>
                   <div className="text-lg font-bold text-gray-900">引擎核心</div>
                   <div className="text-sm text-gray-500 mt-1">
-                    配置本地 OpenClaw 引擎地址与 Token（自动保存）。
+                    配置 AgentCore OS 的 API-first 运行模式、本地运行时地址与可选的 Dify sidecar 编排。
                   </div>
                   <div className="text-xs text-gray-500 mt-1">
-                    提示：如果你运行的是 openclaw-gateway，API 端口可能不是 8000（例如
-                    18791）。
+                    推荐策略：普通用户选择“轻量桌面运行时 + 纯 API”；只有在需要本地 Dify sidecar 时才启用 Docker Compose。
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-gray-200 p-5 bg-white space-y-4">
+                  <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+                    <div className="max-w-3xl">
+                      <div className="text-sm font-semibold text-gray-900">初始化与诊断</div>
+                      <div className="text-xs text-gray-500 mt-1 leading-6">
+                        AgentCore OS 会把运行模式、云端模型与本地 sidecar 状态统一折算成 readiness。先把这里跑通，再去放大自动化能力。
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={refreshRuntimeDoctor}
+                        className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-900 transition-colors hover:bg-gray-50"
+                      >
+                        <RefreshCw
+                          className={[
+                            "h-3.5 w-3.5",
+                            runtimeDoctorLoading ? "animate-spin" : "",
+                          ].join(" ")}
+                        />
+                        {runtimeDoctorLoading ? "检测中..." : "运行诊断"}
+                      </button>
+                      {runtimeDoctor &&
+                      runtimeDoctor.recommendedProfile !== form.runtime.profile ? (
+                        <button
+                          type="button"
+                          onClick={() => applyRuntimeProfile(runtimeDoctor.recommendedProfile)}
+                          className="rounded-xl border border-gray-900 bg-gray-900 px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-black"
+                        >
+                          应用推荐模式
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.1fr)_340px]">
+                    <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="text-sm font-semibold text-gray-900">System readiness</div>
+                        <div
+                          className={[
+                            "inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-semibold",
+                            runtimeSummary.initializationComplete
+                              ? "border border-emerald-200 bg-emerald-50 text-emerald-700"
+                              : "border border-amber-200 bg-amber-50 text-amber-700",
+                          ].join(" ")}
+                        >
+                          {runtimeSummary.initializationComplete ? (
+                            <CheckCircle2 className="h-3.5 w-3.5" />
+                          ) : (
+                            <AlertTriangle className="h-3.5 w-3.5" />
+                          )}
+                          {runtimeSummary.completedSteps}/{runtimeSummary.totalSteps} ready
+                        </div>
+                      </div>
+
+                      <div className="mt-4 space-y-2">
+                        {runtimeSummary.checklist.map((item) => (
+                          <div
+                            key={item.id}
+                            className="rounded-2xl border border-gray-200 bg-white px-4 py-3"
+                          >
+                            <div className="flex items-center justify-between gap-3">
+                              <div className="text-sm font-semibold text-gray-900">{item.title}</div>
+                              <div
+                                className={[
+                                  "rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em]",
+                                  item.status === "ready"
+                                    ? "bg-emerald-100 text-emerald-700"
+                                    : item.status === "checking"
+                                      ? "bg-sky-100 text-sky-700"
+                                      : "bg-amber-100 text-amber-700",
+                                ].join(" ")}
+                              >
+                                {item.status === "ready"
+                                  ? "Ready"
+                                  : item.status === "checking"
+                                    ? "Check"
+                                    : "Action"}
+                              </div>
+                            </div>
+                            <div className="mt-2 text-xs leading-5 text-gray-500">
+                              {item.detail}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-gray-200 bg-[linear-gradient(180deg,#fbfdff_0%,#ffffff_100%)] p-4">
+                      <div className="text-sm font-semibold text-gray-900">Local diagnostics</div>
+                      <div className="mt-2 text-xs leading-5 text-gray-500">
+                        这里会告诉你一台全新电脑是否已经具备“安装后即可运行测试”的条件。
+                      </div>
+
+                      <div className="mt-4 space-y-2">
+                        {[
+                          { label: "Local Store", check: runtimeDoctor?.checks.localStore },
+                          { label: "Runtime Template", check: runtimeDoctor?.checks.runtimeTemplate },
+                          { label: "FFmpeg", check: runtimeDoctor?.checks.ffmpeg },
+                          { label: "Docker", check: runtimeDoctor?.checks.docker },
+                          { label: "Compose", check: runtimeDoctor?.checks.dockerCompose },
+                          { label: "Node", check: runtimeDoctor?.checks.node },
+                        ].map((item) => (
+                          <div
+                            key={item.label}
+                            className="flex items-center justify-between rounded-2xl border border-gray-200 bg-white px-4 py-3"
+                          >
+                            <div className="text-sm font-semibold text-gray-900">{item.label}</div>
+                            <div
+                              className={[
+                                "rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em]",
+                                item.check?.ok
+                                  ? "bg-emerald-100 text-emerald-700"
+                                  : "bg-gray-100 text-gray-600",
+                              ].join(" ")}
+                            >
+                              {item.check?.ok
+                                ? "Ready"
+                                : runtimeDoctorLoading
+                                  ? "Checking"
+                                  : "Missing"}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-3">
+                        {[
+                          {
+                            label: "Desktop Light",
+                            ready: runtimeDoctor?.readiness.desktopLightReady,
+                          },
+                          {
+                            label: "Desktop + Dify",
+                            ready: runtimeDoctor?.readiness.desktopDifyReady,
+                          },
+                          {
+                            label: "Creative Studio",
+                            ready: runtimeDoctor?.readiness.creativeStudioReady,
+                          },
+                        ].map((item) => (
+                          <div
+                            key={item.label}
+                            className="rounded-2xl border border-gray-200 bg-white px-4 py-3"
+                          >
+                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-gray-500">
+                              {item.label}
+                            </div>
+                            <div className="mt-2 text-sm font-semibold text-gray-900">
+                              {item.ready ? "Ready" : runtimeDoctorLoading ? "Checking" : "Not ready"}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="mt-4 rounded-2xl border border-gray-200 bg-white px-4 py-3 text-xs leading-6 text-gray-600">
+                        {runtimeDoctorError
+                          ? `Diagnostics unavailable: ${runtimeDoctorError}`
+                          : runtimeDoctor
+                            ? `Recommended profile: ${
+                                runtimeDoctor.recommendedProfile === "desktop_light"
+                                  ? "Desktop Light Runtime"
+                                  : "Desktop + Dify Runtime"
+                              }. ${runtimeDoctor.nextAction}`
+                            : "Run diagnostics to confirm local sidecar readiness."}
+                      </div>
+
+                      <div className="mt-4 rounded-2xl border border-gray-200 bg-white p-4">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="text-sm font-semibold text-gray-900">Backend bridge</div>
+                          <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-gray-500">
+                            {sidecarLoading
+                              ? "Loading"
+                              : sidecarStatus?.running
+                                ? "Running"
+                                : sidecarStatus?.synced
+                                  ? "Synced"
+                                  : "Unsynced"}
+                          </div>
+                        </div>
+                        <div className="mt-2 text-xs leading-5 text-gray-500">
+                          这里是前后端联动边界。前端只提交配置和动作，真正的 compose 管理在服务端执行。
+                        </div>
+
+                        <div className="mt-4 flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={handleSyncRuntimeBridge}
+                            disabled={sidecarActionLoading !== null}
+                            className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-900 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {sidecarActionLoading === "sync" ? "同步中..." : "同步到后端"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleBootRuntimeSidecar}
+                            disabled={
+                              sidecarActionLoading !== null ||
+                              form.runtime.profile !== "desktop_dify"
+                            }
+                            className="rounded-xl border border-gray-900 bg-gray-900 px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-black disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {sidecarActionLoading === "boot" ? "启动中..." : "静默拉起 sidecar"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleStopRuntimeSidecar}
+                            disabled={
+                              sidecarActionLoading !== null ||
+                              form.runtime.profile !== "desktop_dify"
+                            }
+                            className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-900 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {sidecarActionLoading === "stop" ? "停止中..." : "停止 sidecar"}
+                          </button>
+                        </div>
+
+                        <div className="mt-4 rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-xs leading-6 text-gray-600">
+                          {sidecarError
+                            ? `Bridge error: ${sidecarError}`
+                            : sidecarStatus?.lastAction.message
+                              ? `Last action: ${sidecarStatus.lastAction.message}`
+                              : "Sync the current runtime config so the backend bridge can reuse it later."}
+                        </div>
+
+                        {sidecarStatus?.services.length ? (
+                          <div className="mt-3 space-y-2">
+                            {sidecarStatus.services.map((service) => (
+                              <div
+                                key={service.service}
+                                className="flex items-center justify-between rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3"
+                              >
+                                <div>
+                                  <div className="text-sm font-semibold text-gray-900">
+                                    {service.service}
+                                  </div>
+                                  <div className="text-xs text-gray-500">
+                                    {service.statusText}
+                                  </div>
+                                </div>
+                                <div className="text-right">
+                                  <div className="text-xs font-semibold text-gray-900">
+                                    {service.health || service.state}
+                                  </div>
+                                  <div className="text-[11px] text-gray-500">
+                                    {service.publishedPorts.join(", ") || "no ports"}
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-gray-200 p-5 bg-white space-y-4">
+                  <div>
+                    <div className="text-sm font-semibold text-gray-900">桌面运行模式</div>
+                    <div className="text-xs text-gray-500 mt-1">
+                      这决定 AgentCore OS 是作为轻量桌面工作台运行，还是额外挂上本地 sidecar / Dify 编排层。
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                    {[
+                      {
+                        id: "desktop_light" as const,
+                        title: "轻量桌面运行时（推荐）",
+                        desc: "只保留本地 workflow、状态与资产层；所有模型能力走云端 API。",
+                      },
+                      {
+                        id: "desktop_dify" as const,
+                        title: "桌面 + Dify Sidecar",
+                        desc: "本地额外挂载精简 Dify 栈，用于编排、队列和知识库能力。",
+                      },
+                    ].map((option) => {
+                      const active = form.runtime.profile === option.id;
+                      return (
+                        <button
+                          key={option.id}
+                          type="button"
+                          onClick={() => applyRuntimeProfile(option.id)}
+                          className={[
+                            "rounded-2xl border p-4 text-left transition-colors",
+                            active
+                              ? "border-gray-900 bg-gray-900 text-white"
+                              : "border-gray-200 bg-white hover:bg-gray-50",
+                          ].join(" ")}
+                        >
+                          <div className="text-sm font-semibold">{option.title}</div>
+                          <div className={["mt-2 text-xs leading-5", active ? "text-white/75" : "text-gray-500"].join(" ")}>
+                            {option.desc}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                    <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
+                      <div className="text-xs font-semibold uppercase tracking-[0.12em] text-gray-500">LLM Strategy</div>
+                      <div className="mt-2 text-sm font-semibold text-gray-900">API Only</div>
+                      <div className="mt-1 text-xs leading-5 text-gray-500">
+                        当前桌面版不依赖本地大模型部署，只走 BYOK 云模型调用。
+                      </div>
+                    </div>
+                    <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
+                      <div className="text-xs font-semibold uppercase tracking-[0.12em] text-gray-500">Shell</div>
+                      <div className="mt-2 text-sm font-semibold text-gray-900">
+                        {form.runtime.shell === "tauri" ? "Tauri Desktop" : "Browser / Web Shell"}
+                      </div>
+                      <div className="mt-1 text-xs leading-5 text-gray-500">
+                        先保留浏览器壳，后续桌面版迁移时切到 Tauri。
+                      </div>
+                    </div>
+                    <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
+                      <div className="text-xs font-semibold uppercase tracking-[0.12em] text-gray-500">Orchestration</div>
+                      <div className="mt-2 text-sm font-semibold text-gray-900">
+                        {form.runtime.orchestration === "docker_compose" ? "Docker Compose" : "None"}
+                      </div>
+                      <div className="mt-1 text-xs leading-5 text-gray-500">
+                        仅在本地 sidecar 模式下启用精简编排层。
+                      </div>
+                    </div>
                   </div>
                 </div>
 
@@ -635,10 +1179,10 @@ export function SettingsAppWindow({
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <div>
                       <div className="text-sm font-semibold text-gray-900">
-                        OpenClaw 引擎连接
+                        本地运行时与可选 sidecar
                       </div>
                       <div className="text-xs text-gray-500 mt-1">
-                        默认：{defaultSettings.openclaw.baseUrl}
+                        OpenClaw / AgentCore runtime 可单独连接；如果你要挂 Dify sidecar，也在这里配置本地地址。
                       </div>
                     </div>
                     <button
@@ -651,10 +1195,10 @@ export function SettingsAppWindow({
                     </button>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
-                        引擎地址
+                        Agent Runtime URL
                       </label>
                       <input
                         value={form.openclaw.baseUrl}
@@ -668,10 +1212,13 @@ export function SettingsAppWindow({
                         className="w-full rounded-xl border border-gray-300 bg-white px-4 py-2.5 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-blue-500"
                         autoComplete="off"
                       />
+                      <div className="mt-2 text-xs text-gray-500">
+                        提示：如果你运行的是本地 gateway / sidecar，这里通常是 `http://127.0.0.1:18789`。
+                      </div>
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
-                        API Token
+                        Agent Runtime Token
                       </label>
                       <input
                         type="password"
@@ -687,6 +1234,855 @@ export function SettingsAppWindow({
                         autoComplete="off"
                       />
                     </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Local App URL
+                      </label>
+                      <input
+                        value={form.runtime.localAppUrl}
+                        onChange={(e) =>
+                          setForm((prev) => ({
+                            ...prev,
+                            runtime: { ...prev.runtime, localAppUrl: e.target.value },
+                          }))
+                        }
+                        placeholder="http://127.0.0.1:3000"
+                        className="w-full rounded-xl border border-gray-300 bg-white px-4 py-2.5 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        autoComplete="off"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Sidecar API URL
+                      </label>
+                      <input
+                        value={form.runtime.sidecarApiUrl}
+                        onChange={(e) =>
+                          setForm((prev) => ({
+                            ...prev,
+                            runtime: { ...prev.runtime, sidecarApiUrl: e.target.value },
+                          }))
+                        }
+                        placeholder="http://127.0.0.1:8080"
+                        className="w-full rounded-xl border border-gray-300 bg-white px-4 py-2.5 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        autoComplete="off"
+                      />
+                      <div className="mt-2 text-xs text-gray-500">
+                        桌面壳模式下，前端会优先把 `/api/*` 请求转发到这里。适合连接 AgentCore 本地运行时。
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Dify Base URL
+                      </label>
+                      <input
+                        value={form.runtime.difyBaseUrl}
+                        onChange={(e) =>
+                          setForm((prev) => ({
+                            ...prev,
+                            runtime: { ...prev.runtime, difyBaseUrl: e.target.value },
+                          }))
+                        }
+                        placeholder="http://127.0.0.1:5001"
+                        className="w-full rounded-xl border border-gray-300 bg-white px-4 py-2.5 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        autoComplete="off"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Compose Project Name
+                      </label>
+                      <input
+                        value={form.runtime.composeProjectName}
+                        onChange={(e) =>
+                          setForm((prev) => ({
+                            ...prev,
+                            runtime: { ...prev.runtime, composeProjectName: e.target.value },
+                          }))
+                        }
+                        placeholder="agentcore-runtime"
+                        className="w-full rounded-xl border border-gray-300 bg-white px-4 py-2.5 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        autoComplete="off"
+                      />
+                    </div>
+                    <div className="space-y-3">
+                      <label className="block text-sm font-medium text-gray-700">
+                        Launch Behavior
+                      </label>
+                      <label className="flex items-start gap-3 rounded-xl border border-gray-200 bg-gray-50 px-4 py-3">
+                        <input
+                          type="checkbox"
+                          checked={form.runtime.detectDockerOnLaunch}
+                          onChange={(e) =>
+                            setForm((prev) => ({
+                              ...prev,
+                              runtime: {
+                                ...prev.runtime,
+                                detectDockerOnLaunch: e.target.checked,
+                              },
+                            }))
+                          }
+                          className="mt-1"
+                        />
+                        <span className="text-sm text-gray-700">
+                          启动时检测 Docker / Compose 环境
+                        </span>
+                      </label>
+                      <label className="flex items-start gap-3 rounded-xl border border-gray-200 bg-gray-50 px-4 py-3">
+                        <input
+                          type="checkbox"
+                          checked={form.runtime.autoBootLocalStack}
+                          onChange={(e) =>
+                            setForm((prev) => ({
+                              ...prev,
+                              runtime: {
+                                ...prev.runtime,
+                                autoBootLocalStack: e.target.checked,
+                              },
+                            }))
+                          }
+                          className="mt-1"
+                        />
+                        <span className="text-sm text-gray-700">
+                          自动拉起本地 sidecar 栈（仅桌面版 / Tauri 模式启用）
+                        </span>
+                      </label>
+                    </div>
+                  </div>
+                </div>
+              </section>
+            )}
+
+            {activeTab === "remote" && (
+              <section className="space-y-6">
+                <div>
+                  <div className="text-lg font-bold text-gray-900">移动端接入</div>
+                  <div className="text-sm text-gray-500 mt-1">
+                    让手机上的钉钉、飞书等 IM 把远程指令转发到本机 AgentCore OS，由桌面 Agent 执行后再把结果回发到 IM。
+                  </div>
+                  <div className="text-xs text-gray-500 mt-1">
+                    当前实现是桌面优先的 IM Bridge：桌面 sidecar 负责收消息、调用底层智能体、再通过 webhook 回消息。
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-gray-200 bg-white p-5 space-y-4">
+                  <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                    <div>
+                      <div className="text-sm font-semibold text-gray-900">Bridge readiness</div>
+                      <div className="text-xs text-gray-500 mt-1 leading-6">
+                        这层本质上是“远程指令入口”。你只需要准备一个公网回调地址和一个共享 Token，就能把 IM 消息路由到本机 Agent。
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={handleSaveImBridge}
+                        disabled={imBridgeSaving}
+                        className="rounded-xl border border-gray-900 bg-gray-900 px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-black disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {imBridgeSaving ? "保存中..." : "保存桥接配置"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleTestImBridge()}
+                        disabled={imBridgeTesting}
+                        className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-900 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {imBridgeTesting ? "测试中..." : "发送测试消息"}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.1fr)_320px]">
+                    <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4 space-y-4">
+                      <label className="flex items-start gap-3 rounded-xl border border-gray-200 bg-white px-4 py-3">
+                        <input
+                          type="checkbox"
+                          checked={imBridgeConfig.enabled}
+                          onChange={(e) =>
+                            setImBridgeConfig((prev) => ({ ...prev, enabled: e.target.checked }))
+                          }
+                          className="mt-1"
+                        />
+                        <span>
+                          <span className="block text-sm font-semibold text-gray-900">
+                            启用移动端远程指令桥
+                          </span>
+                          <span className="mt-1 block text-xs leading-5 text-gray-500">
+                            开启后，桌面 sidecar 会接受来自公网回调的远程指令，并尝试自动回消息。
+                          </span>
+                        </span>
+                      </label>
+
+                      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                        <div className="sm:col-span-2">
+                          <label className="mb-2 block text-sm font-medium text-gray-700">
+                            Public Base URL
+                          </label>
+                          <input
+                            value={imBridgeConfig.publicBaseUrl}
+                            onChange={(e) =>
+                              setImBridgeConfig((prev) => ({
+                                ...prev,
+                                publicBaseUrl: e.target.value,
+                              }))
+                            }
+                            placeholder="https://your-tunnel.example.com"
+                            className="w-full rounded-xl border border-gray-300 bg-white px-4 py-2.5 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            autoComplete="off"
+                          />
+                          <div className="mt-2 text-xs text-gray-500">
+                            用 Cloudflare Tunnel / ngrok / FRP 暴露本地 sidecar 后，把公网入口填到这里。
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="mb-2 block text-sm font-medium text-gray-700">
+                            Access Token
+                          </label>
+                          <input
+                            type="password"
+                            value={imBridgeConfig.accessToken}
+                            onChange={(e) =>
+                              setImBridgeConfig((prev) => ({
+                                ...prev,
+                                accessToken: e.target.value,
+                              }))
+                            }
+                            placeholder="设置共享令牌"
+                            className="w-full rounded-xl border border-gray-300 bg-white px-4 py-2.5 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            autoComplete="off"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="mb-2 block text-sm font-medium text-gray-700">
+                            Command Prefix（可选）
+                          </label>
+                          <input
+                            value={imBridgeConfig.commandPrefix}
+                            onChange={(e) =>
+                              setImBridgeConfig((prev) => ({
+                                ...prev,
+                                commandPrefix: e.target.value,
+                              }))
+                            }
+                            placeholder="/agent"
+                            className="w-full rounded-xl border border-gray-300 bg-white px-4 py-2.5 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            autoComplete="off"
+                          />
+                          <div className="mt-2 text-xs text-gray-500">
+                            配置后，仅处理带此前缀的消息，避免群聊噪音误触发。
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-gray-200 bg-[linear-gradient(180deg,#fbfdff_0%,#ffffff_100%)] p-4">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="text-sm font-semibold text-gray-900">Remote health</div>
+                        <div
+                          className={[
+                            "rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em]",
+                            imBridgeHealth?.configured
+                              ? "bg-emerald-100 text-emerald-700"
+                              : "bg-amber-100 text-amber-700",
+                          ].join(" ")}
+                        >
+                          {imBridgeLoading ? "Loading" : imBridgeHealth?.configured ? "Ready" : "Action"}
+                        </div>
+                      </div>
+                      <div className="mt-2 text-xs leading-5 text-gray-500">
+                        {imBridgeError
+                          ? `Bridge error: ${imBridgeError}`
+                          : imBridgeHealth?.nextAction ?? "桌面模式下会从 sidecar 加载 IM Bridge 状态。"}
+                      </div>
+
+                      <div className="mt-4 space-y-2">
+                        {imProviders.map((provider) => {
+                          const callbackUrl = imBridgeHealth?.callbackUrls?.[provider.id] ?? "";
+                          const replyConfigured = Boolean(imBridgeHealth?.providerStatus?.[provider.id]?.replyConfigured);
+                          const authConfigured = Boolean(imBridgeHealth?.providerStatus?.[provider.id]?.authConfigured);
+                          const officialApiConfigured = Boolean(
+                            imBridgeHealth?.providerStatus?.[provider.id]?.officialApiConfigured,
+                          );
+                          return (
+                            <div
+                              key={provider.id}
+                              className="rounded-2xl border border-gray-200 bg-white px-4 py-3"
+                            >
+                              <div className="flex items-center justify-between gap-3">
+                                <div className="text-sm font-semibold text-gray-900">{provider.name}</div>
+                                <div className="flex flex-wrap gap-2">
+                                  <div
+                                    className={[
+                                      "rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em]",
+                                      replyConfigured ? "bg-emerald-100 text-emerald-700" : "bg-gray-100 text-gray-600",
+                                    ].join(" ")}
+                                  >
+                                    {replyConfigured ? "Reply ready" : "No reply webhook"}
+                                  </div>
+                                  <div
+                                    className={[
+                                      "rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em]",
+                                      authConfigured ? "bg-sky-100 text-sky-700" : "bg-gray-100 text-gray-600",
+                                    ].join(" ")}
+                                  >
+                                    {authConfigured ? "Native auth" : "Shared token"}
+                                  </div>
+                                  <div
+                                    className={[
+                                      "rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em]",
+                                      officialApiConfigured ? "bg-violet-100 text-violet-700" : "bg-gray-100 text-gray-600",
+                                    ].join(" ")}
+                                  >
+                                    {officialApiConfigured ? "Official API" : "Webhook reply"}
+                                  </div>
+                                </div>
+                              </div>
+                              <div className="mt-1 text-xs leading-5 text-gray-500">{provider.desc}</div>
+                              <div className="mt-2 rounded-xl bg-gray-50 px-3 py-2 font-mono text-[11px] leading-5 text-gray-700 break-all">
+                                {callbackUrl || "请先填写 Public Base URL 后生成回调地址"}
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => handleTestImBridge(provider.id)}
+                                disabled={imBridgeTesting}
+                                className="mt-3 rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-900 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                发测试消息
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-gray-200 bg-white p-5 space-y-4">
+                  <div>
+                    <div className="text-sm font-semibold text-gray-900">回复通道</div>
+                    <div className="text-xs text-gray-500 mt-1">
+                      这里填的是“AgentCore 执行完成后，往哪里回消息”。如果暂时不填，也可以先只用 API 回调观察执行结果。
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                    {imProviders.map((provider) => (
+                      <div key={provider.id} className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
+                        <div className="text-sm font-semibold text-gray-900">{provider.name}</div>
+                        <div className="mt-1 text-xs leading-5 text-gray-500">{provider.desc}</div>
+                        <div className="mt-3 inline-flex rounded-xl border border-gray-200 bg-white p-1">
+                          {[
+                            { id: "webhook" as const, label: "Webhook" },
+                            { id: "official_api" as const, label: "官方 API" },
+                          ].map((mode) => {
+                            const active = imBridgeConfig.providers[provider.id].replyMode === mode.id;
+                            return (
+                              <button
+                                key={mode.id}
+                                type="button"
+                                onClick={() =>
+                                  setImBridgeConfig((prev) => ({
+                                    ...prev,
+                                    providers: {
+                                      ...prev.providers,
+                                      [provider.id]: {
+                                        ...prev.providers[provider.id],
+                                        replyMode: mode.id,
+                                      },
+                                    },
+                                  }))
+                                }
+                                className={[
+                                  "rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors",
+                                  active ? "bg-gray-900 text-white" : "text-gray-600 hover:bg-gray-50",
+                                ].join(" ")}
+                              >
+                                {mode.label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                        <label className="mt-3 block text-xs font-semibold text-gray-600">
+                          Reply Webhook URL
+                        </label>
+                        <input
+                          value={imBridgeConfig.providers[provider.id].replyWebhookUrl}
+                          onChange={(e) =>
+                            setImBridgeConfig((prev) => ({
+                              ...prev,
+                              providers: {
+                                ...prev.providers,
+                                [provider.id]: {
+                                  ...prev.providers[provider.id],
+                                  replyWebhookUrl: e.target.value,
+                                },
+                              },
+                            }))
+                          }
+                          placeholder="https://open.feishu.cn/..."
+                          className="mt-2 w-full rounded-xl border border-gray-300 bg-white px-4 py-2.5 text-sm focus:border-transparent focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          autoComplete="off"
+                        />
+                        {provider.id === "feishu" || provider.id === "dingtalk" ? (
+                          <div className="mt-3 space-y-3">
+                            <label className="block text-xs font-semibold text-gray-600">
+                              Official API Base URL
+                            </label>
+                            <input
+                              value={imBridgeConfig.providers[provider.id].officialApiBaseUrl}
+                              onChange={(e) =>
+                                setImBridgeConfig((prev) => ({
+                                  ...prev,
+                                  providers: {
+                                    ...prev.providers,
+                                    [provider.id]: {
+                                      ...prev.providers[provider.id],
+                                      officialApiBaseUrl: e.target.value,
+                                    },
+                                  },
+                                }))
+                              }
+                              placeholder={provider.id === "feishu" ? "https://open.feishu.cn" : "https://api.dingtalk.com"}
+                              className="mt-2 w-full rounded-xl border border-gray-300 bg-white px-4 py-2.5 text-sm focus:border-transparent focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              autoComplete="off"
+                            />
+                            <div className="grid grid-cols-1 gap-3">
+                              <input
+                                value={imBridgeConfig.providers[provider.id].officialAppId}
+                                onChange={(e) =>
+                                  setImBridgeConfig((prev) => ({
+                                    ...prev,
+                                    providers: {
+                                      ...prev.providers,
+                                      [provider.id]: {
+                                        ...prev.providers[provider.id],
+                                        officialAppId: e.target.value,
+                                      },
+                                    },
+                                  }))
+                                }
+                                placeholder={provider.id === "feishu" ? "App ID" : "App Key"}
+                                className="w-full rounded-xl border border-gray-300 bg-white px-4 py-2.5 text-sm focus:border-transparent focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                autoComplete="off"
+                              />
+                              <input
+                                type="password"
+                                value={imBridgeConfig.providers[provider.id].officialAppSecret}
+                                onChange={(e) =>
+                                  setImBridgeConfig((prev) => ({
+                                    ...prev,
+                                    providers: {
+                                      ...prev.providers,
+                                      [provider.id]: {
+                                        ...prev.providers[provider.id],
+                                        officialAppSecret: e.target.value,
+                                      },
+                                    },
+                                  }))
+                                }
+                                placeholder="App Secret"
+                                className="w-full rounded-xl border border-gray-300 bg-white px-4 py-2.5 text-sm focus:border-transparent focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                autoComplete="off"
+                              />
+                              {provider.id === "feishu" ? (
+                                <>
+                                  <input
+                                    value={imBridgeConfig.providers[provider.id].officialTargetIdType}
+                                    onChange={(e) =>
+                                      setImBridgeConfig((prev) => ({
+                                        ...prev,
+                                        providers: {
+                                          ...prev.providers,
+                                          [provider.id]: {
+                                            ...prev.providers[provider.id],
+                                            officialTargetIdType: e.target.value,
+                                          },
+                                        },
+                                      }))
+                                    }
+                                    placeholder="chat_id / open_id / user_id"
+                                    className="w-full rounded-xl border border-gray-300 bg-white px-4 py-2.5 text-sm focus:border-transparent focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    autoComplete="off"
+                                  />
+                                  <input
+                                    value={imBridgeConfig.providers[provider.id].officialTargetId}
+                                    onChange={(e) =>
+                                      setImBridgeConfig((prev) => ({
+                                        ...prev,
+                                        providers: {
+                                          ...prev.providers,
+                                          [provider.id]: {
+                                            ...prev.providers[provider.id],
+                                            officialTargetId: e.target.value,
+                                          },
+                                        },
+                                      }))
+                                    }
+                                    placeholder="固定 receive_id（可选）"
+                                    className="w-full rounded-xl border border-gray-300 bg-white px-4 py-2.5 text-sm focus:border-transparent focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    autoComplete="off"
+                                  />
+                                </>
+                              ) : (
+                                <>
+                                  <input
+                                    value={imBridgeConfig.providers[provider.id].officialRobotCode}
+                                    onChange={(e) =>
+                                      setImBridgeConfig((prev) => ({
+                                        ...prev,
+                                        providers: {
+                                          ...prev.providers,
+                                          [provider.id]: {
+                                            ...prev.providers[provider.id],
+                                            officialRobotCode: e.target.value,
+                                          },
+                                        },
+                                      }))
+                                    }
+                                    placeholder="Robot Code"
+                                    className="w-full rounded-xl border border-gray-300 bg-white px-4 py-2.5 text-sm focus:border-transparent focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    autoComplete="off"
+                                  />
+                                  <input
+                                    value={imBridgeConfig.providers[provider.id].officialConversationId}
+                                    onChange={(e) =>
+                                      setImBridgeConfig((prev) => ({
+                                        ...prev,
+                                        providers: {
+                                          ...prev.providers,
+                                          [provider.id]: {
+                                            ...prev.providers[provider.id],
+                                            officialConversationId: e.target.value,
+                                          },
+                                        },
+                                      }))
+                                    }
+                                    placeholder="固定会话 ID（可选）"
+                                    className="w-full rounded-xl border border-gray-300 bg-white px-4 py-2.5 text-sm focus:border-transparent focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    autoComplete="off"
+                                  />
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
+
+                  <label className="flex items-start gap-3 rounded-xl border border-gray-200 bg-gray-50 px-4 py-3">
+                    <input
+                      type="checkbox"
+                      checked={imBridgeConfig.autoReply}
+                      onChange={(e) =>
+                        setImBridgeConfig((prev) => ({ ...prev, autoReply: e.target.checked }))
+                      }
+                      className="mt-1"
+                    />
+                    <span>
+                      <span className="block text-sm font-semibold text-gray-900">自动回消息</span>
+                      <span className="mt-1 block text-xs leading-5 text-gray-500">
+                        开启后，Bridge 会在桌面 Agent 返回结果后立即往对应 IM webhook 推送文本结果。
+                      </span>
+                    </span>
+                  </label>
+                </div>
+
+                <div className="rounded-2xl border border-gray-200 bg-white p-5 space-y-4">
+                  <div>
+                    <div className="text-sm font-semibold text-gray-900">原生回调校验</div>
+                    <div className="text-xs text-gray-500 mt-1">
+                      如果你用的是飞书/钉钉官方机器人回调，可以在这里补上官方风格的校验参数。未填写时，系统仍然使用共享 Access Token 模式。
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                    <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
+                      <div className="text-sm font-semibold text-gray-900">飞书 Verification Token</div>
+                      <div className="mt-1 text-xs leading-5 text-gray-500">
+                        若配置，AgentCore 会校验飞书事件体里的 `token` 字段；适合飞书事件订阅回调。
+                      </div>
+                      <input
+                        value={imBridgeConfig.providers.feishu.verificationToken}
+                        onChange={(e) =>
+                          setImBridgeConfig((prev) => ({
+                            ...prev,
+                            providers: {
+                              ...prev.providers,
+                              feishu: {
+                                ...prev.providers.feishu,
+                                verificationToken: e.target.value,
+                              },
+                            },
+                          }))
+                        }
+                        placeholder="feishu verification token"
+                        className="mt-3 w-full rounded-xl border border-gray-300 bg-white px-4 py-2.5 text-sm focus:border-transparent focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        autoComplete="off"
+                      />
+                    </div>
+
+                    <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
+                      <div className="text-sm font-semibold text-gray-900">钉钉 Sign Secret</div>
+                      <div className="mt-1 text-xs leading-5 text-gray-500">
+                        若配置，AgentCore 会按钉钉 `timestamp + sign` 方式校验回调；适合钉钉机器人安全设置。
+                      </div>
+                      <input
+                        type="password"
+                        value={imBridgeConfig.providers.dingtalk.signingSecret}
+                        onChange={(e) =>
+                          setImBridgeConfig((prev) => ({
+                            ...prev,
+                            providers: {
+                              ...prev.providers,
+                              dingtalk: {
+                                ...prev.providers.dingtalk,
+                                signingSecret: e.target.value,
+                              },
+                            },
+                          }))
+                        }
+                        placeholder="SEC..."
+                        className="mt-3 w-full rounded-xl border border-gray-300 bg-white px-4 py-2.5 text-sm focus:border-transparent focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        autoComplete="off"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+                    <div className="rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-xs leading-6 text-gray-600">
+                      飞书原生模式下，除了共享 `Access Token`，还可以要求消息体内 `token` 与这里配置的 Verification Token 一致。
+                    </div>
+                    <div className="rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-xs leading-6 text-gray-600">
+                      钉钉原生模式下，除了共享 `Access Token`，还可以要求请求 query 中携带 `timestamp` 和 `sign`，并用 Sign Secret 做 HMAC 校验。
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-gray-200 bg-white p-5 space-y-4">
+                  <div>
+                    <div className="text-sm font-semibold text-gray-900">接入步骤</div>
+                    <div className="text-xs text-gray-500 mt-1">
+                      当前最稳的接法不是在手机上直接跑 Agent，而是让飞书 / 钉钉机器人或自动化把消息转成 HTTP 回调，桌面 AgentCore OS 接住后执行。
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-3 lg:grid-cols-4">
+                    {[
+                      {
+                        title: "1. 开启桥接",
+                        desc: "在这里打开“启用移动端远程指令桥”，并保存 Access Token。",
+                      },
+                      {
+                        title: "2. 暴露桌面回调",
+                        desc: "用 Cloudflare Tunnel、ngrok 或 FRP 把本机 sidecar 端口暴露到公网。",
+                      },
+                      {
+                        title: "3. 配置 IM 自动化",
+                        desc: "把飞书 / 钉钉的消息转发到 callback URL，并附带 Token。",
+                      },
+                      {
+                        title: "4. 自动回消息",
+                        desc: "填好 Reply Webhook URL 后，桌面 Agent 完成任务会把结果自动推回手机。",
+                      },
+                    ].map((item) => (
+                      <div
+                        key={item.title}
+                        className="rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3"
+                      >
+                        <div className="text-sm font-semibold text-gray-900">{item.title}</div>
+                        <div className="mt-1 text-xs leading-5 text-gray-500">{item.desc}</div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="rounded-2xl border border-blue-100 bg-blue-50/70 px-4 py-3 text-xs leading-6 text-blue-900">
+                    推荐公网方案：`Cloudflare Tunnel`。它最适合非技术用户，免公网 IP，稳定性也比临时内网穿透更好。
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+                    {imProviders.map((provider) => {
+                      const example = imBridgeExamples[provider.id];
+                      return (
+                        <div
+                          key={provider.id}
+                          className="rounded-2xl border border-gray-200 bg-gray-50 p-4"
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <div>
+                              <div className="text-sm font-semibold text-gray-900">{provider.name}</div>
+                              <div className="mt-1 text-xs leading-5 text-gray-500">{provider.desc}</div>
+                            </div>
+                            <div className="rounded-full bg-white px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-600">
+                              POST
+                            </div>
+                          </div>
+
+                          <div className="mt-4 space-y-3">
+                            <div>
+                              <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-gray-500">
+                                Callback URL
+                              </div>
+                              <div className="mt-1 rounded-xl bg-white px-3 py-2 font-mono text-[11px] leading-5 text-gray-700 break-all">
+                                {example.callbackUrl}
+                              </div>
+                            </div>
+
+                            <div>
+                              <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-gray-500">
+                                Auth
+                              </div>
+                              <div className="mt-1 rounded-xl bg-white px-3 py-2 font-mono text-[11px] leading-5 text-gray-700 break-all">
+                                {example.auth}
+                              </div>
+                            </div>
+
+                            <div>
+                              <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-gray-500">
+                                JSON Body
+                              </div>
+                              <pre className="mt-1 overflow-x-auto rounded-xl bg-[#0b1220] px-3 py-3 text-[11px] leading-5 text-slate-100">
+                                {example.body}
+                              </pre>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+                    <div className="rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3">
+                      <div className="text-sm font-semibold text-gray-900">飞书推荐接法</div>
+                      <div className="mt-1 text-xs leading-6 text-gray-500">
+                        使用飞书机器人或飞书自动化，把用户消息映射成 `event.message.content`，再 POST 到飞书 callback URL。
+                        如果做事件订阅校验，AgentCore 会自动回 `challenge`。
+                      </div>
+                    </div>
+                    <div className="rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3">
+                      <div className="text-sm font-semibold text-gray-900">钉钉推荐接法</div>
+                      <div className="mt-1 text-xs leading-6 text-gray-500">
+                        使用钉钉机器人或自动化，把消息文本映射到 `text.content`，并把 Token 放到 Header 或 query 参数里。
+                        AgentCore 会按 `conversationId / senderStaffId` 维持会话上下文。
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-gray-200 bg-white p-5 space-y-4">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      <div className="text-sm font-semibold text-gray-900">最近移动端任务</div>
+                      <div className="text-xs text-gray-500 mt-1">
+                        这里会记录最近通过钉钉、飞书或 webhook 进入桌面的远程指令，便于排查“消息有没有进来、有没有执行、有没有回发成功”。
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleClearImBridgeEvents}
+                      disabled={imBridgeClearing || imBridgeLoading}
+                      className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-900 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {imBridgeClearing ? "清空中..." : "清空记录"}
+                    </button>
+                  </div>
+
+                  <div className="space-y-3">
+                    {imBridgeEvents.length === 0 ? (
+                      <div className="rounded-2xl border border-dashed border-gray-300 bg-gray-50 px-4 py-8 text-center text-sm text-gray-500">
+                        暂无移动端任务记录。发送一条测试消息或从手机端触发一次指令后，这里会出现最近记录。
+                      </div>
+                    ) : (
+                      imBridgeEvents.map((event) => {
+                        const statusMeta = getImEventStatusMeta(event.status);
+                        const expanded = expandedImEventId === event.id;
+                        return (
+                          <div
+                            key={event.id}
+                            className="rounded-2xl border border-gray-200 bg-gray-50 px-4 py-4"
+                          >
+                            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                              <div className="min-w-0">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="rounded-full bg-white px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-600">
+                                    {event.provider}
+                                  </span>
+                                  <span
+                                    className={[
+                                      "rounded-full px-2.5 py-1 text-[10px] font-semibold",
+                                      statusMeta.className,
+                                    ].join(" ")}
+                                  >
+                                    {statusMeta.label}
+                                  </span>
+                                  <span className="rounded-full bg-white px-2.5 py-1 text-[10px] font-semibold text-gray-600">
+                                    {event.kind === "test" ? "测试" : "远程指令"}
+                                  </span>
+                                </div>
+                                <div className="mt-3 text-sm font-semibold text-gray-900 break-words">
+                                  {event.requestText || "未记录指令内容"}
+                                </div>
+                                <div className="mt-2 text-xs leading-6 text-gray-500 break-words">
+                                  {event.resultPreview || event.error || "暂无执行结果摘要。"}
+                                </div>
+                                <div className="mt-3 flex flex-wrap gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setExpandedImEventId((prev) => (prev === event.id ? null : event.id))
+                                    }
+                                    className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-900 transition-colors hover:bg-gray-50"
+                                  >
+                                    {expanded ? "收起详情" : "查看详情"}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRetryImBridgeEvent(event.id)}
+                                    disabled={!event.retryable || retryingEventId === event.id}
+                                    className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-900 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                  >
+                                    {retryingEventId === event.id ? "重试中..." : "重试"}
+                                  </button>
+                                </div>
+                              </div>
+                              <div className="shrink-0 space-y-2 text-xs text-gray-500 lg:text-right">
+                                <div>{new Date(event.createdAt).toLocaleString()}</div>
+                                <div>{event.sessionId ? `会话：${event.sessionId}` : "会话：未记录"}</div>
+                                <div>{event.delivered ? "回消息：已投递" : "回消息：未投递"}</div>
+                              </div>
+                            </div>
+                            {expanded ? (
+                              <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-2">
+                                <div className="rounded-2xl border border-gray-200 bg-white px-4 py-3">
+                                  <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-gray-500">
+                                    完整指令
+                                  </div>
+                                  <div className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-gray-800">
+                                    {event.commandText || event.requestText || "未记录完整指令。"}
+                                  </div>
+                                </div>
+                                <div className="rounded-2xl border border-gray-200 bg-white px-4 py-3">
+                                  <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-gray-500">
+                                    执行结果
+                                  </div>
+                                  <div className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-gray-800">
+                                    {event.resultText || event.resultPreview || event.error || "暂无详细结果。"}
+                                  </div>
+                                  {event.sourceEventId ? (
+                                    <div className="mt-3 text-xs text-gray-500">
+                                      来源记录：{event.sourceEventId}
+                                    </div>
+                                  ) : null}
+                                </div>
+                              </div>
+                            ) : null}
+                          </div>
+                        );
+                      })
+                    )}
                   </div>
                 </div>
               </section>

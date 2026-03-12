@@ -1,0 +1,81 @@
+import asyncio
+import os
+import time
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+
+def parse_allowed_origins() -> list[str]:
+    raw = os.getenv("LOBSTER_CORS_ALLOW_ORIGINS", "").strip()
+    if not raw:
+        return [
+            "http://localhost:3000",
+            "tauri://localhost",
+            "http://tauri.localhost",
+            "https://tauri.localhost",
+        ]
+    return [item.strip() for item in raw.split(",") if item.strip()]
+
+
+HEARTBEAT_TIMEOUT_SECONDS = max(
+    5,
+    int(os.getenv("AGENTCORE_HEARTBEAT_TIMEOUT_SECONDS", "10")),
+)
+HEARTBEAT_PATH = os.getenv("AGENTCORE_HEARTBEAT_PATH", "/_agentcore/heartbeat").strip() or "/_agentcore/heartbeat"
+
+last_heartbeat_at = time.time()
+app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=parse_allowed_origins(),
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+async def heartbeat_monitor() -> None:
+    global last_heartbeat_at
+
+    while True:
+        await asyncio.sleep(2)
+        if time.time() - last_heartbeat_at > HEARTBEAT_TIMEOUT_SECONDS:
+            print(
+                f"[agentcore-sidecar] heartbeat timeout after {HEARTBEAT_TIMEOUT_SECONDS}s; exiting process tree",
+                flush=True,
+            )
+            os._exit(0)
+
+
+@app.on_event("startup")
+async def on_startup() -> None:
+    asyncio.create_task(heartbeat_monitor())
+    print("[agentcore-sidecar] startup complete", flush=True)
+
+
+@app.get("/health")
+async def health() -> dict[str, str]:
+    return {"status": "ok"}
+
+
+@app.post(HEARTBEAT_PATH)
+async def heartbeat() -> dict[str, float | str]:
+    global last_heartbeat_at
+    last_heartbeat_at = time.time()
+    return {
+        "status": "alive",
+        "timestamp": last_heartbeat_at,
+    }
+
+
+@app.get("/_agentcore/runtime-contract")
+async def runtime_contract() -> dict[str, object]:
+    return {
+        "status": "ok",
+        "heartbeatPath": HEARTBEAT_PATH,
+        "heartbeatTimeoutSeconds": HEARTBEAT_TIMEOUT_SECONDS,
+        "allowedOrigins": parse_allowed_origins(),
+        "port": os.getenv("PORT", "8080"),
+    }

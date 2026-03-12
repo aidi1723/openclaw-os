@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   ArrowRight,
@@ -21,19 +22,14 @@ import {
 import type { AppId, AppState, AppWindowState, ModeId } from "@/apps/types";
 import { getMode, modes } from "@/apps/modes";
 import { getApp, listApps } from "@/apps/registry";
-import { DesktopIcon } from "@/components/DesktopIcon";
 import { StatusClock } from "@/components/StatusClock";
 import { SystemTrayWindows } from "@/components/SystemTrayWindows";
 import { PublishQueueRunner } from "@/components/PublishQueueRunner";
-import { SolutionBlueprintPanel } from "@/components/workflows/SolutionBlueprintPanel";
-import { UnifiedAssetConsole } from "@/components/workflows/UnifiedAssetConsole";
-import { WorkflowSignalCenter } from "@/components/workflows/WorkflowSignalCenter";
+import { requestOpenClawAgent } from "@/lib/openclaw-agent-client";
 import {
-  jumpToAssetTarget,
-  type AssetJumpTarget,
-} from "@/lib/asset-jumps";
-import {
+  appCatalog,
   getAppDisplayName,
+  getCategoryLabel,
   getDisplayLanguage,
   getModeDisplayName,
   getShellLabel,
@@ -42,7 +38,9 @@ import {
 import { getLanguageLabel } from "@/lib/language";
 import {
   defaultSettings,
+  getActiveLlmConfig,
   hasSavedSettings,
+  hydrateSettingsFromDesktopBridge,
   loadSettings,
   saveSettings,
   type InterfaceLanguage,
@@ -50,32 +48,18 @@ import {
   type PersonalizationSettings,
 } from "@/lib/settings";
 import { Spotlight } from "@/components/Spotlight";
-import {
-  getCreatorAssetByWorkflowRunId,
-  subscribeCreatorAssets,
-} from "@/lib/creator-assets";
+import { useSidecarHeartbeat } from "@/hooks/useSidecarHeartbeat";
+import { getDesktopRuntimeStatusSummary } from "@/lib/desktop-runtime";
 import {
   getIndustryBundle,
   mapIndustryToWorkspaceIndustry,
   type IndustryId,
 } from "@/lib/industry-solutions";
 import {
-  getResearchAssetByWorkflowRunId,
-  subscribeResearchAssets,
-} from "@/lib/research-assets";
-import {
-  getSalesAssetByWorkflowRunId,
-  subscribeSalesAssets,
-} from "@/lib/sales-assets";
-import {
   industrySolutionStarters,
   runIndustrySolutionStarterActions,
   type IndustrySolutionStarter,
 } from "@/lib/solution-starters";
-import {
-  getSupportAssetByWorkflowRunId,
-  subscribeSupportAssets,
-} from "@/lib/support-assets";
 import type {
   ContentRepurposerPrefill,
   CreatorRadarPrefill,
@@ -106,54 +90,35 @@ import {
   subscribeWorkflowRuns,
   type WorkflowRunRecord,
 } from "@/lib/workflow-runs";
+import { createTask, updateTask } from "@/lib/tasks";
 
 export default function Home() {
+  useSidecarHeartbeat();
   const languageWelcomeKey = "openclaw.language_welcome.v1";
+  const runtimeOnboardingKey = "agentcore.runtime_onboarding.dismissed.v1";
+  const agentSidebarWidthKey = "agentcore.desktop.agent-sidebar.width.v1";
+  const agentSidebarCollapsedKey = "agentcore.desktop.agent-sidebar.collapsed.v1";
   const [volumeLevel, setVolumeLevel] = useState(2);
   const [modeId, setModeId] = useState<ModeId>("creator");
   const [personalization, setPersonalization] = useState<PersonalizationSettings>(
     () => defaultSettings.personalization,
   );
   const [showLanguageWelcome, setShowLanguageWelcome] = useState(false);
+  const [showRuntimeOnboarding, setShowRuntimeOnboarding] = useState(false);
   const [spotlightOpen, setSpotlightOpen] = useState(false);
   const [activeProvider, setActiveProvider] = useState<LlmProviderId>("kimi");
   const [activeWindow, setActiveWindow] = useState<AppId | null>(null);
   const [desktopCanScrollUp, setDesktopCanScrollUp] = useState(false);
   const [desktopCanScrollDown, setDesktopCanScrollDown] = useState(false);
+  const [agentSidebarWidth, setAgentSidebarWidth] = useState(296);
+  const [agentSidebarCollapsed, setAgentSidebarCollapsed] = useState(false);
 
-  const [appStateById, setAppStateById] = useState<Record<AppId, AppState>>({
-    industry_hub: "closed",
-    recruiting_desk: "closed",
-    project_ops: "closed",
-    deep_research_hub: "closed",
-    financial_document_bot: "closed",
-    social_media_autopilot: "closed",
-    website_seo_studio: "closed",
-    language_learning_desk: "closed",
-    tech_news_digest: "closed",
-    morning_brief: "closed",
-    meeting_copilot: "closed",
-    personal_crm: "closed",
-    inbox_declutter: "closed",
-    support_copilot: "closed",
-    second_brain: "closed",
-    email_assistant: "closed",
-    deal_desk: "closed",
-    family_calendar: "closed",
-    habit_tracker: "closed",
-    health_tracker: "closed",
-    creator_radar: "closed",
-    content_repurposer: "closed",
-    solo_ops: "closed",
-    solutions_hub: "closed",
-    media_ops: "closed",
-    creative_studio: "closed",
-    knowledge_vault: "closed",
-    account_center: "closed",
-    task_manager: "closed",
-    openclaw_console: "closed",
-    publisher: "closed",
-    settings: "closed",
+  const [appStateById, setAppStateById] = useState<Record<AppId, AppState>>(() => {
+    const initial = {} as Record<AppId, AppState>;
+    for (const app of listApps()) {
+      initial[app.id] = "closed";
+    }
+    return initial;
   });
   const [appZOrder, setAppZOrder] = useState<AppId[]>([]);
 
@@ -183,6 +148,11 @@ export default function Home() {
       setActiveProvider(settings.llm.activeProvider);
     };
     apply();
+    void hydrateSettingsFromDesktopBridge().then((hydrated) => {
+      if (!hydrated) return;
+      setPersonalization(hydrated.personalization);
+      setActiveProvider(hydrated.llm.activeProvider);
+    });
     window.addEventListener("openclaw:settings", apply);
     window.addEventListener("storage", apply);
     const onOpenApp = (e: Event) => {
@@ -344,9 +314,44 @@ export default function Home() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     try {
+      const savedWidth = Number(window.localStorage.getItem(agentSidebarWidthKey) || "");
+      const savedCollapsed = window.localStorage.getItem(agentSidebarCollapsedKey);
+      if (Number.isFinite(savedWidth) && savedWidth >= 260 && savedWidth <= 420) {
+        setAgentSidebarWidth(savedWidth);
+      }
+      if (savedCollapsed === "1") setAgentSidebarCollapsed(true);
+      if (savedCollapsed === "0") setAgentSidebarCollapsed(false);
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(agentSidebarWidthKey, String(agentSidebarWidth));
+      window.localStorage.setItem(
+        agentSidebarCollapsedKey,
+        agentSidebarCollapsed ? "1" : "0",
+      );
+    } catch {
+      // ignore
+    }
+  }, [agentSidebarWidth, agentSidebarCollapsed]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
       const hasSeenWelcome = window.localStorage.getItem(languageWelcomeKey) === "1";
       if (!hasSeenWelcome && !hasSavedSettings()) {
         setShowLanguageWelcome(true);
+      }
+      const settings = loadSettings();
+      const dismissed = window.localStorage.getItem(runtimeOnboardingKey) === "1";
+      const runtimeSummary = getDesktopRuntimeStatusSummary(settings);
+      const needsOnboarding = !runtimeSummary.initializationComplete;
+      if (!dismissed && needsOnboarding) {
+        setShowRuntimeOnboarding(true);
       }
     } catch {
       // ignore
@@ -630,6 +635,7 @@ export default function Home() {
     };
     return map[personalization.desktopBackground];
   }, [personalization.desktopBackground]);
+  const desktopRightInset = agentSidebarCollapsed ? 0 : agentSidebarWidth + 18;
 
   const applyLanguage = (next: InterfaceLanguage) => {
     const settings = loadSettings();
@@ -693,18 +699,6 @@ export default function Home() {
     runIndustrySolutionStarterActions(starter.actions);
   };
 
-  const activateScenarioTrigger = (starter: IndustrySolutionStarter, triggerId: string) => {
-    applyScenarioWorkspace(starter.scenarioId, starter.industryId);
-    const scenario = getWorkspaceScenario(starter.scenarioId);
-    if (!scenario) return;
-    const trigger =
-      scenario.triggers.find((item) => item.id === triggerId) ?? scenario.triggers[0];
-    startWorkflowRun(scenario, trigger?.type ?? "manual");
-    starter.apps.slice(0, 3).forEach((appId, index) => {
-      window.setTimeout(() => openApp(appId), index * 90);
-    });
-  };
-
   const enterRoleDesk = (roleDesk: WorkspaceRoleDesk, industryId: IndustryId) => {
     applyScenarioWorkspace(roleDesk.scenarioId, industryId);
     const scenario = getWorkspaceScenario(roleDesk.scenarioId);
@@ -760,21 +754,25 @@ export default function Home() {
       <div className="absolute inset-x-0 top-0 h-40 bg-gradient-to-b from-white/10 to-transparent" />
 
       {/* 状态栏 */}
-      <div className="absolute left-0 right-0 top-0 z-20 px-3 pt-3 sm:px-6 sm:pt-4">
-        <div className="rounded-[28px] border border-white/15 bg-black/15 px-3 py-2.5 shadow-[0_16px_48px_rgba(0,0,0,0.22)] backdrop-blur-2xl sm:px-5">
-          <div className="flex flex-wrap items-center justify-between gap-3">
+      <div
+        className="absolute left-0 right-0 top-0 z-20 px-3 pt-3 sm:px-6 sm:pt-3.5"
+        style={{ right: desktopRightInset }}
+      >
+        <div className="rounded-[24px] border border-white/12 bg-black/15 px-3 py-2 shadow-[0_14px_40px_rgba(0,0,0,0.18)] backdrop-blur-2xl sm:px-4">
+          <div className="flex flex-wrap items-center justify-between gap-2.5">
             <div className="flex min-w-0 items-center gap-2 text-white/95 drop-shadow">
-          <button
-            type="button"
-            className="inline-flex h-9 w-9 items-center justify-center rounded-full hover:bg-white/10 transition-colors"
-            onClick={() => setSpotlightOpen(true)}
-            title={`${getShellLabel("search", interfaceLanguage)} (⌘K / Ctrl+K)`}
-            aria-label={getShellLabel("search", interfaceLanguage)}
-          >
-            <Search className="w-4 h-4 text-white/90" />
-          </button>
-          <StatusClock locale={resolveLanguageLocale(interfaceLanguage)} />
-          </div>
+              <AgentCoreBrand />
+              <button
+                type="button"
+                className="inline-flex h-8 w-8 items-center justify-center rounded-full hover:bg-white/10 transition-colors"
+                onClick={() => setSpotlightOpen(true)}
+                title={`${getShellLabel("search", interfaceLanguage)} (⌘K / Ctrl+K)`}
+                aria-label={getShellLabel("search", interfaceLanguage)}
+              >
+                <Search className="w-4 h-4 text-white/90" />
+              </button>
+              <StatusClock locale={resolveLanguageLocale(interfaceLanguage)} />
+            </div>
             <div className="order-3 flex w-full items-center justify-between gap-2 sm:order-2 sm:w-auto sm:justify-end">
               <LanguageCapsule
                 value={interfaceLanguage}
@@ -793,23 +791,23 @@ export default function Home() {
                 }}
               />
               <div className="flex items-center gap-2 text-white/90">
-                <Wifi className="hidden h-4 w-4 sm:block" />
+                <Wifi className="hidden h-3.5 w-3.5 sm:block" />
                 <button
                   type="button"
-                  className="flex h-9 w-9 items-center justify-center rounded-full hover:bg-white/10 transition-colors"
+                  className="flex h-8 w-8 items-center justify-center rounded-full hover:bg-white/10 transition-colors"
                   onClick={() => setVolumeLevel((prev) => (prev + 1) % 3)}
                   title="音量"
                   aria-label="音量"
                 >
                   {getVolumeIcon()}
                 </button>
-                <div className="relative hidden h-4 w-7 overflow-hidden rounded-md border border-white/40 sm:block">
+                <div className="relative hidden h-3.5 w-6 overflow-hidden rounded-md border border-white/40 sm:block">
                   <div className="absolute inset-y-0 left-0 w-4 bg-white/80" />
                 </div>
               </div>
             </div>
 
-            <div className="order-2 flex flex-1 items-center justify-end gap-2 text-white/90 sm:order-3 sm:flex-none">
+            <div className="order-2 flex flex-1 items-center justify-end gap-1.5 text-white/90 sm:order-3 sm:flex-none">
               <ModeSwitcher
                 value={modeId}
                 language={interfaceLanguage}
@@ -827,14 +825,14 @@ export default function Home() {
               />
               <button
                 type="button"
-                className="rounded-full border border-white/15 bg-white/10 px-3 py-1.5 text-xs font-semibold text-white/90 transition-colors hover:bg-white/15"
+                className="rounded-full border border-white/15 bg-white/10 px-2.5 py-1 text-[11px] font-semibold text-white/90 transition-colors hover:bg-white/15"
                 onClick={() => requestOpenSettings("personalization")}
               >
                 {getShellLabel("workspace", interfaceLanguage)}
               </button>
               <button
                 type="button"
-                className="rounded-full border border-white/15 bg-white/10 px-3 py-1.5 text-xs font-semibold text-white/90 transition-colors hover:bg-white/15"
+                className="rounded-full border border-white/15 bg-white/10 px-2.5 py-1 text-[11px] font-semibold text-white/90 transition-colors hover:bg-white/15"
                 onClick={() => openApp("settings")}
               >
                 {getShellLabel("settings", interfaceLanguage)}
@@ -845,62 +843,59 @@ export default function Home() {
       </div>
 
       {/* 主屏图标网格 */}
-      <div className="absolute inset-0 z-10 px-4 pb-40 pt-28 sm:px-8 sm:pb-44 sm:pt-24">
+      <div
+        className="absolute inset-0 z-10 px-4 pb-40 pt-24 sm:px-8 sm:pb-44 sm:pt-20"
+        style={{ right: desktopRightInset }}
+      >
         <div
           ref={desktopScrollRef}
           className="h-full overflow-y-auto overflow-x-hidden overscroll-contain scroll-smooth pr-1 touch-pan-y"
         >
-          <div className="mx-auto max-w-6xl pb-4">
+          <div className="mx-auto max-w-[1160px] pb-4">
             <SolutionCenterPanel
               language={interfaceLanguage}
-              activeScenarioTitle={workspaceScenario?.title}
               starters={featuredSolutionStarters}
               onLaunchStarter={launchFeaturedStarter}
-              onActivateTrigger={activateScenarioTrigger}
               onEnterRoleDesk={enterRoleDesk}
               onOpenIndustryHub={() => openApp("industry_hub")}
               onOpenSolutionsHub={() => openApp("solutions_hub")}
             />
 
-            <div className="mt-8 grid auto-rows-max content-start grid-cols-3 gap-x-4 gap-y-6 sm:grid-cols-4 sm:gap-x-6 sm:gap-y-7 lg:grid-cols-6">
-            {desktopApps.map((appId) => {
-              const app = getApp(appId);
-              const Icon = app.icon;
-              return (
-                <DesktopIcon
-                  key={appId}
-                  icon={<Icon className="w-9 h-9 text-white/90" />}
-                  name={getAppDisplayName(appId, app.name, interfaceLanguage)}
-                  onClick={() => openApp(appId)}
-                />
-              );
-            })}
-            </div>
+            <WorkspaceAppWidgetGrid
+              appIds={desktopApps}
+              dockApps={dockApps}
+              language={interfaceLanguage}
+              appStateById={appStateById}
+              onOpenApp={openApp}
+            />
           </div>
         </div>
       </div>
 
       {desktopCanScrollUp || desktopCanScrollDown ? (
-        <div className="pointer-events-none absolute bottom-28 right-4 z-20 flex flex-col gap-2 sm:bottom-32 sm:right-6">
+        <div
+          className="pointer-events-none absolute bottom-26 z-20 flex flex-col gap-1.5 sm:bottom-30"
+          style={{ right: agentSidebarCollapsed ? 76 : agentSidebarWidth + 20 }}
+        >
           <button
             type="button"
             onClick={() => scrollDesktopByPage(-1)}
             disabled={!desktopCanScrollUp}
-            className="pointer-events-auto inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-white/15 bg-black/25 text-white/90 shadow-xl backdrop-blur-2xl transition-colors hover:bg-black/35 disabled:cursor-not-allowed disabled:opacity-35"
+            className="pointer-events-auto inline-flex h-9 w-9 items-center justify-center rounded-[18px] border border-white/15 bg-black/25 text-white/90 shadow-xl backdrop-blur-2xl transition-colors hover:bg-black/35 disabled:cursor-not-allowed disabled:opacity-35"
             aria-label="向上翻页"
             title="向上翻页"
           >
-            <ChevronUp className="h-5 w-5" />
+            <ChevronUp className="h-4.5 w-4.5" />
           </button>
           <button
             type="button"
             onClick={() => scrollDesktopByPage(1)}
             disabled={!desktopCanScrollDown}
-            className="pointer-events-auto inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-white/15 bg-black/25 text-white/90 shadow-xl backdrop-blur-2xl transition-colors hover:bg-black/35 disabled:cursor-not-allowed disabled:opacity-35"
+            className="pointer-events-auto inline-flex h-9 w-9 items-center justify-center rounded-[18px] border border-white/15 bg-black/25 text-white/90 shadow-xl backdrop-blur-2xl transition-colors hover:bg-black/35 disabled:cursor-not-allowed disabled:opacity-35"
             aria-label="向下翻页"
             title="向下翻页"
           >
-            <ChevronDown className="h-5 w-5" />
+            <ChevronDown className="h-4.5 w-4.5" />
           </button>
         </div>
       ) : null}
@@ -945,8 +940,8 @@ export default function Home() {
       })}
 
       {/* Dock */}
-      <div className="absolute bottom-3 left-1/2 z-30 w-[calc(100%-20px)] max-w-max -translate-x-1/2 sm:bottom-4">
-        <div className="flex items-center gap-2 overflow-x-auto rounded-[28px] border border-white/20 bg-white/15 px-3 py-3 shadow-2xl backdrop-blur-2xl sm:gap-3 sm:px-4">
+      <div className="absolute bottom-3 left-1/2 z-30 w-[calc(100%-20px)] max-w-max -translate-x-1/2 sm:bottom-3.5">
+        <div className="flex items-center gap-1.5 overflow-x-auto rounded-[24px] border border-white/18 bg-white/14 px-2.5 py-2.5 shadow-[0_18px_44px_rgba(0,0,0,0.2)] backdrop-blur-2xl sm:gap-2 sm:px-3">
           {dockApps.map((appId) => {
             const app = getApp(appId);
             const Icon = app.icon;
@@ -961,7 +956,7 @@ export default function Home() {
                 running={running}
                 onClick={() => toggleAppFromDock(appId)}
               >
-                <Icon className="w-7 h-7 text-white/90" />
+                <Icon className="h-5 w-5 text-white/88" />
               </DockIcon>
             );
           })}
@@ -976,6 +971,25 @@ export default function Home() {
           name: getAppDisplayName(a.id, a.name, interfaceLanguage),
         }))}
         onOpenApp={(appId) => openApp(appId as AppId)}
+      />
+
+      <AgentSidebar
+        collapsed={agentSidebarCollapsed}
+        width={agentSidebarWidth}
+        language={interfaceLanguage}
+        activeProvider={activeProvider}
+        scenarioTitle={workspaceScenario?.title}
+        contextSummary={[
+          `当前工作台：${workspaceScenario?.title || "未固定"}`,
+          `当前行业：${personalization.activeIndustry}`,
+          `桌面应用数：${desktopApps.length}`,
+          `Dock 应用数：${dockApps.length}`,
+          `当前模型提供商：${providerLabel(activeProvider)}`,
+        ].join("\n")}
+        onToggleCollapsed={() => setAgentSidebarCollapsed((prev) => !prev)}
+        onResize={(nextWidth) =>
+          setAgentSidebarWidth(Math.max(260, Math.min(420, Math.round(nextWidth))))
+        }
       />
 
       {showLanguageWelcome ? (
@@ -993,22 +1007,36 @@ export default function Home() {
           }}
         />
       ) : null}
+
+      {!showLanguageWelcome && showRuntimeOnboarding ? (
+        <RuntimeOnboardingCard
+          onChooseLightRuntime={() => {
+            const settings = loadSettings();
+            saveSettings({
+              ...settings,
+              runtime: {
+                ...settings.runtime,
+                profile: "desktop_light",
+                orchestration: "none",
+                autoBootLocalStack: false,
+              },
+            });
+            setShowRuntimeOnboarding(false);
+            try {
+              window.localStorage.setItem(runtimeOnboardingKey, "1");
+            } catch {
+              // ignore
+            }
+          }}
+          onOpenEngineSettings={() => {
+            requestOpenSettings("engine");
+            setShowRuntimeOnboarding(false);
+          }}
+        />
+      ) : null}
     </div>
   );
 }
-
-const solutionAccentClasses: Record<IndustrySolutionStarter["accent"], string> = {
-  blue:
-    "border-sky-200 bg-[linear-gradient(135deg,rgba(239,246,255,0.96)_0%,rgba(255,255,255,0.98)_48%,rgba(224,242,254,0.9)_100%)]",
-  emerald:
-    "border-emerald-200 bg-[linear-gradient(135deg,rgba(236,253,245,0.98)_0%,rgba(255,255,255,0.98)_48%,rgba(240,253,244,0.92)_100%)]",
-  amber:
-    "border-amber-200 bg-[linear-gradient(135deg,rgba(255,251,235,0.98)_0%,rgba(255,255,255,0.98)_48%,rgba(254,243,199,0.86)_100%)]",
-  rose:
-    "border-rose-200 bg-[linear-gradient(135deg,rgba(255,241,242,0.98)_0%,rgba(255,255,255,0.98)_48%,rgba(255,228,230,0.88)_100%)]",
-  slate:
-    "border-slate-200 bg-[linear-gradient(135deg,rgba(248,250,252,0.98)_0%,rgba(255,255,255,0.98)_48%,rgba(226,232,240,0.9)_100%)]",
-};
 
 const solutionBadgeClasses: Record<IndustrySolutionStarter["accent"], string> = {
   blue: "border-sky-200 bg-sky-50 text-sky-700",
@@ -1037,219 +1065,88 @@ function getRunStateMeta(run: WorkflowRunRecord | null) {
   }
 }
 
-type StarterAssetSnapshot = {
-  title: string;
-  detail: string;
-  meta: string;
-  jumpTarget?: AssetJumpTarget;
-};
+function getWorkflowModeMeta(mode: "auto" | "assist" | "review" | "manual") {
+  switch (mode) {
+    case "auto":
+      return { label: "自动", className: "border-emerald-200 bg-emerald-50 text-emerald-700" };
+    case "assist":
+      return { label: "协作", className: "border-sky-200 bg-sky-50 text-sky-700" };
+    case "review":
+      return { label: "审核", className: "border-amber-200 bg-amber-50 text-amber-700" };
+    case "manual":
+    default:
+      return { label: "人工", className: "border-slate-200 bg-white text-slate-600" };
+  }
+}
 
-function getStarterAssetSnapshot(
+function getPrivacySafeStarterTitle(
   starter: IndustrySolutionStarter,
-  workflowRuns: WorkflowRunRecord[],
-): StarterAssetSnapshot {
-  const run = workflowRuns.find((item) => item.scenarioId === starter.scenarioId) ?? null;
-  if (!run) {
-    return {
-      title: "还没有最近资产",
-      detail: "先启动这条 Hero Workflow，系统会把结果沉淀成业务资产。",
-      meta: "No recent asset",
-    };
-  }
-
-  if (starter.scenarioId === "sales-pipeline") {
-    const asset = getSalesAssetByWorkflowRunId(run.id);
-    if (!asset) {
-      return {
-        title: "销售资产等待写入",
-        detail: "最近一次运行已存在，但还没有询盘、草稿或 CRM 资产快照。",
-        meta: getRunStateMeta(run).label,
-      };
-    }
-    const jumpTarget =
-      asset.contactId
-        ? {
-            kind: "record" as const,
-            appId: "personal_crm" as const,
-            eventName: "openclaw:crm-select",
-            eventDetail: { contactId: asset.contactId },
-          }
-        : asset.emailThreadId
-          ? {
-              kind: "record" as const,
-              appId: "email_assistant" as const,
-              eventName: "openclaw:email-assistant-select",
-              eventDetail: { threadId: asset.emailThreadId },
-            }
-          : asset.dealId
-            ? {
-                kind: "record" as const,
-                appId: "deal_desk" as const,
-                eventName: "openclaw:deal-desk-select",
-                eventDetail: { dealId: asset.dealId },
-              }
-            : undefined;
-    return {
-      title: asset.company || asset.contactName || "销售推进资产",
-      detail:
-        asset.latestDraftSubject ||
-        asset.nextAction ||
-        asset.requirementSummary ||
-        "已沉淀客户偏好、跟进节奏和下一步动作。",
-      meta: asset.quoteStatus || asset.status,
-      jumpTarget,
-    };
-  }
-
-  if (starter.scenarioId === "creator-studio") {
-    const asset = getCreatorAssetByWorkflowRunId(run.id);
-    if (!asset) {
-      return {
-        title: "内容资产等待写入",
-        detail: "最近一次运行已存在，但还没有选题、内容包或发布快照。",
-        meta: getRunStateMeta(run).label,
-      };
-    }
-    const jumpTarget =
-      asset.draftId
-        ? {
-            kind: "publisher" as const,
-            prefill: {
-              draftId: asset.draftId,
-              workflowRunId: run.id,
-              workflowScenarioId: starter.scenarioId,
-            },
-          }
-        : asset.repurposerProjectId
-          ? {
-              kind: "record" as const,
-              appId: "content_repurposer" as const,
-              eventName: "openclaw:content-repurposer-select",
-              eventDetail: { projectId: asset.repurposerProjectId },
-            }
-          : asset.radarItemId
-            ? {
-                kind: "record" as const,
-                appId: "creator_radar" as const,
-                eventName: "openclaw:creator-radar-select",
-                eventDetail: { radarItemId: asset.radarItemId },
-              }
-            : undefined;
-    return {
-      title: asset.topic || "内容增长资产",
-      detail:
-        asset.latestDraftTitle ||
-        asset.primaryAngle ||
-        asset.nextAction ||
-        "已沉淀选题角度、多平台内容包和发布候选稿。",
-      meta: asset.publishStatus || asset.status,
-      jumpTarget,
-    };
-  }
-
-  if (starter.scenarioId === "support-ops") {
-    const asset = getSupportAssetByWorkflowRunId(run.id);
-    if (!asset) {
-      return {
-        title: "客服资产等待写入",
-        detail: "最近一次运行已存在，但还没有回复、升级或 FAQ 快照。",
-        meta: getRunStateMeta(run).label,
-      };
-    }
-    const jumpTarget =
-      asset.ticketId
-        ? {
-            kind: "record" as const,
-            appId: "support_copilot" as const,
-            eventName: "openclaw:support-copilot-select",
-            eventDetail: { ticketId: asset.ticketId },
-          }
-        : asset.inboxItemId
-          ? {
-              kind: "record" as const,
-              appId: "inbox_declutter" as const,
-              eventName: "openclaw:inbox-select",
-              eventDetail: { itemId: asset.inboxItemId },
-            }
-          : undefined;
-    return {
-      title: asset.customer || "客服处理资产",
-      detail:
-        asset.latestReply ||
-        asset.faqDraft ||
-        asset.nextAction ||
-        "已沉淀建议回复、升级任务和 FAQ 条目。",
-      meta: asset.status,
-      jumpTarget,
-    };
-  }
-
-  if (starter.scenarioId === "research-radar") {
-    const asset = getResearchAssetByWorkflowRunId(run.id);
-    if (!asset) {
-      return {
-        title: "研究资产等待写入",
-        detail: "最近一次运行已存在，但还没有研究摘要或晨报快照。",
-        meta: getRunStateMeta(run).label,
-      };
-    }
-    const jumpTarget =
-      asset.briefId
-        ? {
-            kind: "record" as const,
-            appId: "morning_brief" as const,
-            eventName: "openclaw:morning-brief-select",
-            eventDetail: { briefId: asset.briefId },
-          }
-        : asset.reportId
-          ? {
-              kind: "record" as const,
-              appId: "deep_research_hub" as const,
-              eventName: "openclaw:research-hub-select",
-              eventDetail: { reportId: asset.reportId },
-            }
-          : undefined;
-    return {
-      title: asset.topic || "研究策略资产",
-      detail:
-        asset.latestBrief ||
-        asset.angle ||
-        asset.nextAction ||
-        "已沉淀研究简报、观察框架和决策摘要。",
-      meta: asset.status,
-      jumpTarget,
-    };
-  }
-
-  return {
-    title: "最近资产",
-    detail: run.scenarioTitle,
-    meta: getRunStateMeta(run).label,
+  fallback: string,
+  language: InterfaceLanguage,
+) {
+  const displayLanguage = getDisplayLanguage(language);
+  const map: Record<string, { zh: string; en: string; ja: string }> = {
+    "sales-inbound-quote": {
+      zh: "销售询盘处理",
+      en: "Sales Intake Flow",
+      ja: "営業問い合わせ処理",
+    },
+    "creator-campaign-sprint": {
+      zh: "内容增长冲刺",
+      en: "Creator Sprint",
+      ja: "コンテンツ成長スプリント",
+    },
+    "support-escalation-recovery": {
+      zh: "客服升级处理",
+      en: "Support Recovery",
+      ja: "サポート復旧フロー",
+    },
+    "research-market-scan": {
+      zh: "研究扫描任务",
+      en: "Research Scan",
+      ja: "リサーチスキャン",
+    },
   };
+
+  return map[starter.id]?.[displayLanguage] || fallback;
+}
+
+function getCompactRunSummary(run: WorkflowRunRecord | null, stageCount: number) {
+  if (!run) {
+    return `未启动 · ${stageCount} 个阶段`;
+  }
+  const currentIndex = run.currentStageId
+    ? run.stageRuns.findIndex((stage) => stage.id === run.currentStageId)
+    : run.state === "completed"
+      ? run.stageRuns.length - 1
+      : -1;
+  const visibleIndex = currentIndex >= 0 ? currentIndex + 1 : 1;
+  return `${getRunStateMeta(run).label} · ${visibleIndex}/${Math.max(stageCount, 1)} 阶段`;
+}
+
+function getAppShortName(appId: AppId, language: InterfaceLanguage) {
+  const app = getApp(appId);
+  const fullName = getAppDisplayName(appId, app.name, language);
+  return fullName.length > 14 ? `${fullName.slice(0, 14)}…` : fullName;
 }
 
 function SolutionCenterPanel({
   language,
-  activeScenarioTitle,
   starters,
   onLaunchStarter,
-  onActivateTrigger,
   onEnterRoleDesk,
   onOpenIndustryHub,
   onOpenSolutionsHub,
 }: {
   language: InterfaceLanguage;
-  activeScenarioTitle?: string;
   starters: IndustrySolutionStarter[];
   onLaunchStarter: (starter: IndustrySolutionStarter) => void;
-  onActivateTrigger: (starter: IndustrySolutionStarter, triggerId: string) => void;
   onEnterRoleDesk: (roleDesk: WorkspaceRoleDesk, industryId: IndustryId) => void;
   onOpenIndustryHub: () => void;
   onOpenSolutionsHub: () => void;
 }) {
   const [selectedStarterId, setSelectedStarterId] = useState(starters[0]?.id ?? "");
   const [workflowRuns, setWorkflowRuns] = useState<WorkflowRunRecord[]>(() => getWorkflowRuns());
-  const [, setAssetRevision] = useState(0);
 
   useEffect(() => {
     if (!selectedStarterId && starters[0]?.id) {
@@ -1269,23 +1166,6 @@ function SolutionCenterPanel({
     };
   }, []);
 
-  useEffect(() => {
-    const bump = () => setAssetRevision((value) => value + 1);
-    const offSales = subscribeSalesAssets(bump);
-    const offCreator = subscribeCreatorAssets(bump);
-    const offSupport = subscribeSupportAssets(bump);
-    const offResearch = subscribeResearchAssets(bump);
-    const onStorage = () => bump();
-    window.addEventListener("storage", onStorage);
-    return () => {
-      offSales();
-      offCreator();
-      offSupport();
-      offResearch();
-      window.removeEventListener("storage", onStorage);
-    };
-  }, []);
-
   const displayLanguage = getDisplayLanguage(language);
   const selectedStarter =
     starters.find((starter) => starter.id === selectedStarterId) ?? starters[0] ?? null;
@@ -1301,9 +1181,9 @@ function SolutionCenterPanel({
     if (displayLanguage === "en") {
       return {
         eyebrow: "Solution Center",
-        title: "Start from the business scenario, not the app shelf.",
+        title: "Pick the workflow. The workspace follows.",
         desc:
-          "AgentCore OS now surfaces runnable hero workflows first. Pick your industry, enter the matching role desk, and let the system carry the default apps, workflow stages, and assets with you.",
+          "Hero workflows are the entry point. Open the business chain first, then expand the matching role desk and apps only when needed.",
         active: "Current workspace",
         launch: "Launch hero workflow",
         role: "Enter role desk",
@@ -1321,9 +1201,9 @@ function SolutionCenterPanel({
     if (displayLanguage === "ja") {
       return {
         eyebrow: "Solution Center",
-        title: "最初に選ぶのは App ではなく、業務シナリオです。",
+        title: "最初に選ぶのはワークフローです。",
         desc:
-          "AgentCore OS は実行可能な Hero Workflow を最初に前面表示します。業界とロールを選ぶと、対応するアプリ、進行段階、残す資産が一緒に立ち上がります。",
+          "Hero Workflow を先に開き、必要なロールデスクとアプリはその後に段階的に展開します。",
         active: "現在のワークスペース",
         launch: "Hero Workflow を起動",
         role: "ロールデスクに入る",
@@ -1340,9 +1220,9 @@ function SolutionCenterPanel({
     }
     return {
       eyebrow: "Solution Center",
-      title: "先从业务方案进入，而不是先找 App。",
+      title: "先选工作流，再展开工作台。",
       desc:
-        "AgentCore OS 现在把已经跑通的 Hero Workflow 前置为业务入口。先选行业，再进角色桌面，系统会把默认应用、流程阶段和资产沉淀逻辑一起带出来。",
+        "首页只保留可执行业务入口。角色桌面、应用链和资产沉淀都按需展开，不再把说明书长期铺在桌面上。",
       active: "当前工作台",
       launch: "启动这条 Hero Workflow",
       role: "进入角色桌面",
@@ -1362,331 +1242,972 @@ function SolutionCenterPanel({
     return null;
   }
 
-  const liveRuns = starters.map((starter) => {
-    const run = workflowRuns.find((item) => item.scenarioId === starter.scenarioId) ?? null;
-    return { starter, run };
-  });
-  const selectedSnapshot = getStarterAssetSnapshot(selectedStarter, workflowRuns);
-  const starterSnapshots = starters.map((starter) => ({
-    starter,
-    snapshot: getStarterAssetSnapshot(starter, workflowRuns),
-  }));
+  const selectedRun =
+    workflowRuns.find((item) => item.scenarioId === selectedStarter.scenarioId) ?? null;
+  const activeStageCount = selectedScenario?.workflowStages.length ?? 0;
 
   return (
-    <section className="rounded-[36px] border border-white/15 bg-[linear-gradient(135deg,rgba(7,12,24,0.76)_0%,rgba(15,23,42,0.72)_52%,rgba(15,118,110,0.24)_100%)] p-4 text-white shadow-[0_30px_90px_rgba(0,0,0,0.28)] backdrop-blur-2xl sm:p-6">
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,1.1fr)_420px]">
-        <div>
-          <div className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.26em] text-white/75">
-            <Sparkles className="h-3.5 w-3.5" />
-            {copy.eyebrow}
-          </div>
-          <div className="mt-4 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-            <div className="max-w-3xl">
-              <h1 className="text-2xl font-semibold tracking-tight text-white sm:text-[2rem]">{copy.title}</h1>
-              <p className="mt-3 max-w-2xl text-sm leading-6 text-white/70">{copy.desc}</p>
+    <section className="rounded-[34px] bg-[linear-gradient(145deg,rgba(8,12,22,0.72)_0%,rgba(17,24,39,0.64)_52%,rgba(18,55,90,0.38)_100%)] p-3.5 text-white shadow-[0_24px_72px_rgba(0,0,0,0.2)] backdrop-blur-2xl sm:p-4">
+      <div className="grid items-start gap-3.5 xl:grid-cols-[minmax(0,1.28fr)_280px]">
+        <div className="space-y-3">
+          <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+            <div className="max-w-xl">
+              <div className="inline-flex items-center gap-2 rounded-full bg-white/10 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-white/70">
+                <AgentCoreLogoMark size={22} roundedClassName="rounded-[8px]" />
+                {copy.eyebrow}
+              </div>
+              <h1 className="mt-2 text-base font-semibold tracking-tight text-white sm:text-[1.45rem]">
+                {copy.title}
+              </h1>
+              <p className="mt-1 max-w-lg text-[12px] leading-5 text-white/54">{copy.desc}</p>
             </div>
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-1.5">
               <button
                 type="button"
                 onClick={onOpenIndustryHub}
-                className="inline-flex items-center gap-2 rounded-2xl border border-white/15 bg-white/10 px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-white/15"
+                className="inline-flex items-center gap-1.5 rounded-2xl bg-white/10 px-3 py-1.5 text-[11px] font-semibold text-white transition-colors hover:bg-white/15"
               >
-                <BriefcaseBusiness className="h-4 w-4" />
+                <BriefcaseBusiness className="h-3.5 w-3.5" />
                 {copy.industry}
               </button>
               <button
                 type="button"
                 onClick={onOpenSolutionsHub}
-                className="inline-flex items-center gap-2 rounded-2xl border border-white/15 bg-white/10 px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-white/15"
+                className="inline-flex items-center gap-1.5 rounded-2xl bg-white/10 px-3 py-1.5 text-[11px] font-semibold text-white transition-colors hover:bg-white/15"
               >
-                <Bot className="h-4 w-4" />
+                <Bot className="h-3.5 w-3.5" />
                 {copy.library}
               </button>
             </div>
           </div>
 
-          <div className="mt-5 flex flex-wrap gap-2">
+          <div className="grid items-stretch gap-2.5 md:grid-cols-2">
             {starters.map((starter) => {
+              const scenario = getWorkspaceScenario(starter.scenarioId);
+              const starterRoleDesk = starter.roleId
+                ? workspaceRoleDesks.find((desk) => desk.id === starter.roleId) ?? null
+                : null;
+              const run =
+                workflowRuns.find((item) => item.scenarioId === starter.scenarioId) ?? null;
+              const meta = getRunStateMeta(run);
+              const safeTitle = getPrivacySafeStarterTitle(
+                starter,
+                scenario?.title || starter.title,
+                language,
+              );
+              const previewStages = scenario?.workflowStages.slice(0, 3) ?? [];
+              const previewApps = (scenario?.desktopApps ?? []).slice(0, 2);
+              const previewAssets = (scenario?.resultAssets ?? starter.assets).slice(0, 2);
               const active = starter.id === selectedStarter.id;
+
               return (
-                <button
+                <div
                   key={starter.id}
-                  type="button"
+                  role="button"
+                  tabIndex={0}
                   onClick={() => setSelectedStarterId(starter.id)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      setSelectedStarterId(starter.id);
+                    }
+                  }}
                   className={[
-                    "rounded-2xl border px-4 py-3 text-left transition-colors",
+                    "flex h-full cursor-pointer flex-col rounded-[24px] p-3.5 text-left transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/35",
                     active
-                      ? "border-white/25 bg-white/16 text-white"
-                      : "border-white/10 bg-white/6 text-white/75 hover:bg-white/10",
+                      ? "bg-white/14 shadow-[0_14px_46px_rgba(0,0,0,0.2)] ring-1 ring-white/18"
+                      : "bg-black/14 hover:bg-white/10 hover:ring-1 hover:ring-white/12",
                   ].join(" ")}
                 >
-                  <div className="text-sm font-semibold">{starter.title}</div>
-                  <div className="mt-1 text-xs text-white/60">{starter.triggerLabel}</div>
-                </button>
-              );
-            })}
-          </div>
-
-          <div className="mt-5 rounded-[30px] border border-white/10 bg-white/8 p-4 sm:p-5">
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-              <div className="max-w-2xl">
-                <div className={["inline-flex rounded-full border px-3 py-1 text-[11px] font-semibold", solutionBadgeClasses[selectedStarter.accent]].join(" ")}>
-                  {selectedBundle.title}
-                </div>
-                <div className="mt-3 text-xl font-semibold text-white">{selectedStarter.title}</div>
-                <div className="mt-2 text-sm leading-6 text-white/70">{selectedStarter.summary}</div>
-              </div>
-              <div className={["rounded-[26px] border p-4 shadow-sm", solutionAccentClasses[selectedStarter.accent]].join(" ")}>
-                <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">{copy.active}</div>
-                <div className="mt-2 text-sm font-semibold text-slate-950">{activeScenarioTitle || "未固定到专属桌面"}</div>
-                <div className="mt-2 text-xs leading-5 text-slate-600">{selectedBundle.summary}</div>
-              </div>
-            </div>
-
-            <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,0.85fr)]">
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="rounded-[24px] border border-white/10 bg-black/12 p-4">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-white/45">{copy.workflow}</div>
-                  <div className="mt-3 text-sm leading-6 text-white">
-                    {getWorkspaceScenario(selectedStarter.scenarioId)?.workflowTitle || selectedBundle.summary}
+                  <div className="flex items-start justify-between gap-2.5">
+                    <div className="min-w-0">
+                      <div
+                        className={[
+                          "inline-flex rounded-full border px-2.5 py-1 text-[11px] font-semibold",
+                          solutionBadgeClasses[starter.accent],
+                        ].join(" ")}
+                      >
+                        {getIndustryBundle(starter.bundleId)?.title || "Solution"}
+                      </div>
+                      <div className="mt-2 text-sm font-semibold text-white">{safeTitle}</div>
+                      <div className="mt-1 text-[11px] text-white/52">
+                        {starterRoleDesk?.title || scenario?.title || starter.triggerLabel}
+                      </div>
+                    </div>
+                    <span
+                      className={[
+                        "rounded-full border px-2.5 py-1 text-[11px] font-semibold",
+                        meta.className,
+                      ].join(" ")}
+                    >
+                      {meta.label}
+                    </span>
                   </div>
-                </div>
-                <div className="rounded-[24px] border border-white/10 bg-black/12 p-4">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-white/45">{copy.outcome}</div>
-                  <div className="mt-3 text-sm leading-6 text-white">{selectedStarter.outcomeLabel}</div>
-                </div>
-                <div className="rounded-[24px] border border-white/10 bg-black/12 p-4">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-white/45">{copy.assets}</div>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {selectedStarter.assets.map((asset) => (
+
+                  <div className="mt-3 flex flex-wrap gap-1.5">
+                    {previewStages.slice(0, 2).map((stage) => {
+                      const stageMeta = getWorkflowModeMeta(stage.mode);
+                      return (
+                        <span
+                          key={stage.id}
+                          className={[
+                            "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold",
+                            stageMeta.className,
+                          ].join(" ")}
+                        >
+                          {stage.title}
+                        </span>
+                      );
+                    })}
+                  </div>
+
+                  <div className="mt-2.5 text-[11px] leading-4 text-white/58">
+                    {getCompactRunSummary(run, scenario?.workflowStages.length ?? 0)}
+                  </div>
+
+                  <div className="mt-2.5 flex min-h-9 flex-wrap content-start gap-1.5">
+                    {previewApps.map((appId) => (
+                      <span
+                        key={appId}
+                        className="rounded-full bg-white/8 px-2 py-0.5 text-[10px] font-semibold text-white/74"
+                      >
+                        {getAppShortName(appId, language)}
+                      </span>
+                    ))}
+                    {previewAssets.map((asset) => (
                       <span
                         key={asset}
-                        className="rounded-full border border-white/10 bg-white/10 px-3 py-1 text-xs font-semibold text-white/85"
+                        className="rounded-full bg-white/8 px-2 py-0.5 text-[10px] font-semibold text-white/74"
                       >
                         {asset}
                       </span>
                     ))}
                   </div>
-                </div>
-                <div className="rounded-[24px] border border-white/10 bg-black/12 p-4">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-white/45">{copy.apps}</div>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {selectedStarter.apps.map((appId) => (
-                      <span
-                        key={appId}
-                        className="rounded-full border border-white/10 bg-white/10 px-3 py-1 text-xs font-semibold text-white/85"
-                      >
-                        {getAppDisplayName(appId, appId, language)}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              </div>
 
-              <div className="rounded-[28px] border border-white/10 bg-[linear-gradient(135deg,rgba(255,255,255,0.1)_0%,rgba(255,255,255,0.04)_100%)] p-4">
-                <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-white/45">{copy.runtime}</div>
-                <div className="mt-3 space-y-3">
-                  {liveRuns.map(({ starter, run }) => {
-                    const meta = getRunStateMeta(run);
-                    return (
-                      <div key={starter.id} className="rounded-2xl border border-white/10 bg-black/14 p-3">
-                        <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <div className="text-sm font-semibold text-white">{starter.title}</div>
-                            <div className="mt-1 text-xs text-white/55">{starter.triggerLabel}</div>
-                          </div>
-                          <span className={["rounded-full border px-2.5 py-1 text-[11px] font-semibold", meta.className].join(" ")}>
-                            {meta.label}
-                          </span>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-
-            <div className="mt-5 rounded-[28px] border border-white/10 bg-black/12 p-4">
-              <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-white/45">Latest Asset Snapshot</div>
-              <div className="mt-3 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                <div className="max-w-2xl">
-                  <div className="text-lg font-semibold text-white">{selectedSnapshot.title}</div>
-                  <div className="mt-2 text-sm leading-6 text-white/70">{selectedSnapshot.detail}</div>
-                </div>
-                <div className="flex min-w-[180px] flex-col items-start gap-3 lg:items-end">
-                  <div className="rounded-full border border-white/10 bg-white/10 px-3 py-1.5 text-xs font-semibold text-white/80">
-                    {selectedSnapshot.meta}
-                  </div>
-                  {selectedSnapshot.jumpTarget ? (
+                  <div className="mt-auto flex flex-wrap gap-2 pt-3">
                     <button
                       type="button"
-                      onClick={() => jumpToAssetTarget(selectedSnapshot.jumpTarget)}
-                      className="inline-flex items-center gap-2 rounded-2xl border border-white/15 bg-white/10 px-4 py-2.5 text-xs font-semibold text-white transition-colors hover:bg-white/15"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onLaunchStarter(starter);
+                      }}
+                      className="inline-flex items-center gap-1.5 rounded-2xl bg-white px-2.5 py-1.5 text-[10px] font-semibold text-slate-950 transition-colors hover:bg-slate-100"
                     >
-                      <ArrowRight className="h-3.5 w-3.5" />
-                      {copy.jump}
+                      <PlayCircle className="h-3 w-3" />
+                      {copy.launch}
                     </button>
-                  ) : null}
+                    {starterRoleDesk ? (
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onEnterRoleDesk(starterRoleDesk, starter.industryId);
+                        }}
+                        className="inline-flex items-center gap-1.5 rounded-2xl border border-white/15 bg-white/10 px-2.5 py-1.5 text-[10px] font-semibold text-white transition-colors hover:bg-white/15"
+                      >
+                        <ShieldCheck className="h-3 w-3" />
+                        {copy.role}
+                      </button>
+                    ) : null}
+                  </div>
                 </div>
-              </div>
-            </div>
-
-            <div className="mt-5 flex flex-wrap gap-3">
-              <button
-                type="button"
-                onClick={() => onLaunchStarter(selectedStarter)}
-                className="inline-flex items-center gap-2 rounded-2xl bg-white px-4 py-3 text-sm font-semibold text-slate-950 transition-colors hover:bg-slate-100"
-              >
-                <PlayCircle className="h-4 w-4" />
-                {copy.launch}
-              </button>
-              {roleDesk ? (
-                <button
-                  type="button"
-                  onClick={() => onEnterRoleDesk(roleDesk, selectedStarter.industryId)}
-                  className="inline-flex items-center gap-2 rounded-2xl border border-white/15 bg-white/10 px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-white/15"
-                >
-                  <ShieldCheck className="h-4 w-4" />
-                  {copy.role}
-                </button>
-              ) : null}
-            </div>
-
-            <WorkflowSignalCenter
-              language={language}
-              scenario={selectedScenario}
-              run={workflowRuns.find((item) => item.scenarioId === selectedStarter.scenarioId) ?? null}
-              onFireTrigger={(triggerId) => onActivateTrigger(selectedStarter, triggerId)}
-            />
-
-            <SolutionBlueprintPanel
-              language={language}
-              starter={selectedStarter}
-            />
-
-            <UnifiedAssetConsole
-              language={language}
-              onOpenAsset={(target) => jumpToAssetTarget(target)}
-            />
+              );
+            })}
           </div>
         </div>
 
-        <div className="space-y-4">
-          <div className="rounded-[30px] border border-white/10 bg-white/8 p-4">
-            <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-white/45">Industry + Role + Workflow</div>
-            <div className="mt-3 space-y-3">
-              {starters.map((starter) => {
-                const starterRoleDesk = starter.roleId
-                  ? workspaceRoleDesks.find((desk) => desk.id === starter.roleId) ?? null
-                  : null;
-                const meta = getRunStateMeta(workflowRuns.find((item) => item.scenarioId === starter.scenarioId) ?? null);
+        <div className="space-y-3">
+          <div className="rounded-[24px] bg-black/18 p-3.5">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-white/45">
+                  <Sparkles className="h-3.5 w-3.5" />
+                  Active Flow
+                </div>
+                <div className="mt-2 text-base font-semibold text-white">
+                  {getPrivacySafeStarterTitle(
+                    selectedStarter,
+                    selectedScenario?.title || selectedStarter.title,
+                    language,
+                  )}
+                </div>
+              </div>
+              <div className="rounded-full bg-white/10 px-3 py-1 text-[11px] font-semibold text-white/72">
+                {getCompactRunSummary(selectedRun, activeStageCount)}
+              </div>
+            </div>
+            <div className="mt-1.5 text-[11px] leading-5 text-white/56">
+              {selectedScenario?.workflowTitle || selectedBundle.summary}
+            </div>
+            <div className="mt-4 space-y-2.5">
+              {(selectedScenario?.workflowStages ?? []).map((stage, index) => {
+                const stageMeta = getWorkflowModeMeta(stage.mode);
+                const isActive = selectedRun?.currentStageId === stage.id;
+                const isDone =
+                  selectedRun?.stageRuns.find((item) => item.id === stage.id)?.state === "completed";
                 return (
-                  <button
-                    key={starter.id}
-                    type="button"
-                    onClick={() => setSelectedStarterId(starter.id)}
-                    className={[
-                      "w-full rounded-[24px] border p-4 text-left transition-colors",
-                      starter.id === selectedStarter.id
-                        ? "border-white/20 bg-white/14"
-                        : "border-white/8 bg-black/12 hover:bg-white/10",
-                    ].join(" ")}
+                  <div
+                    key={stage.id}
+                    className="grid grid-cols-[18px_minmax(0,1fr)] gap-2.5"
                   >
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <div className="text-sm font-semibold text-white">{starter.title}</div>
-                        <div className="mt-1 text-xs text-white/55">
-                          {getIndustryBundle(starter.bundleId)?.title || starter.bundleId}
-                          {starterRoleDesk ? ` · ${starterRoleDesk.title}` : ""}
+                    <div className="flex flex-col items-center">
+                      <span
+                        className={[
+                          "mt-1 h-3 w-3 rounded-full",
+                          isActive
+                            ? "bg-sky-300 shadow-[0_0_0_4px_rgba(125,211,252,0.16)]"
+                            : isDone
+                              ? "bg-emerald-400"
+                              : "bg-white/28",
+                        ].join(" ")}
+                      />
+                      {index < (selectedScenario?.workflowStages.length ?? 0) - 1 ? (
+                        <span className="mt-2 h-full w-px bg-white/12" />
+                      ) : null}
+                    </div>
+                    <div
+                      className={[
+                        "rounded-[18px] bg-white/[0.06] px-3 py-2.5",
+                        isActive ? "ring-1 ring-white/14" : "",
+                      ].join(" ")}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-white/38">
+                            Stage {index + 1}
+                          </div>
+                          <div className="mt-1 text-[13px] font-semibold text-white">{stage.title}</div>
                         </div>
+                        <span
+                          className={[
+                            "rounded-full border px-2 py-0.5 text-[10px] font-semibold",
+                            stageMeta.className,
+                          ].join(" ")}
+                        >
+                          {stageMeta.label}
+                        </span>
                       </div>
-                      <span className={["rounded-full border px-2.5 py-1 text-[11px] font-semibold", meta.className].join(" ")}>
-                        {meta.label}
-                      </span>
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {stage.appIds.slice(0, 3).map((appId) => (
+                          <span
+                            key={appId}
+                            className="rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-semibold text-white/76"
+                          >
+                            {getAppDisplayName(appId, appId, language)}
+                          </span>
+                        ))}
+                      </div>
                     </div>
-                    <div className="mt-3 flex items-center gap-2 text-xs text-white/65">
-                      <ArrowRight className="h-3.5 w-3.5" />
-                      {starter.triggerLabel}
-                    </div>
-                  </button>
+                  </div>
                 );
               })}
             </div>
           </div>
 
-            <div className="rounded-[30px] border border-white/10 bg-white/8 p-4">
-            <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-white/45">Recent Business Proof</div>
-            <div className="mt-3 space-y-3">
-              {starterSnapshots.map(({ starter, snapshot }) => (
-                <div
-                  key={starter.id}
-                  className={[
-                    "rounded-[24px] border p-4 transition-colors",
-                    starter.id === selectedStarter.id
-                      ? "border-white/20 bg-white/14"
-                      : "border-white/8 bg-black/12 hover:bg-white/10",
-                  ].join(" ")}
-                >
-                  <button
-                    type="button"
-                    onClick={() => setSelectedStarterId(starter.id)}
-                    className="w-full text-left"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <div className="text-sm font-semibold text-white">{starter.title}</div>
-                        <div className="mt-1 text-xs text-white/55">{snapshot.title}</div>
-                      </div>
-                      <span className="rounded-full border border-white/10 bg-white/10 px-2.5 py-1 text-[11px] font-semibold text-white/80">
-                        {snapshot.meta}
-                      </span>
-                    </div>
-                    <div className="mt-3 line-clamp-3 text-xs leading-5 text-white/65">{snapshot.detail}</div>
-                  </button>
-                  <div className="mt-3 flex justify-end">
-                    {snapshot.jumpTarget ? (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSelectedStarterId(starter.id);
-                          jumpToAssetTarget(snapshot.jumpTarget);
-                        }}
-                        className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-3 py-2 text-[11px] font-semibold text-white/85 transition-colors hover:bg-white/15"
-                      >
-                        <ArrowRight className="h-3.5 w-3.5" />
-                        {copy.jump}
-                      </button>
-                    ) : null}
-                  </div>
-                </div>
-              ))}
+          <div className="rounded-[24px] bg-black/16 p-3.5">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-white/45">
+              {copy.role}
             </div>
-          </div>
-
-          <div className="rounded-[30px] border border-white/10 bg-white/8 p-4">
-            <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-white/45">Role Desk</div>
-            {roleDesk ? (
-              <div className="mt-3 rounded-[24px] border border-white/10 bg-black/12 p-4">
-                <div className="text-lg font-semibold text-white">{roleDesk.title}</div>
-                <div className="mt-2 text-sm leading-6 text-white/70">{roleDesk.desc}</div>
-                <div className="mt-4 flex flex-wrap gap-2">
-                  {roleDesk.focus.map((item) => (
-                    <span
-                      key={item}
-                      className="rounded-full border border-white/10 bg-white/10 px-3 py-1 text-xs font-semibold text-white/85"
-                    >
-                      {item}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            ) : (
-              <div className="mt-3 rounded-[24px] border border-dashed border-white/10 bg-black/12 p-4 text-sm text-white/60">{copy.noRole}</div>
-            )}
+            <div className="mt-2.5 text-sm font-semibold text-white">
+              {roleDesk?.title || "General Desk"}
+            </div>
+            <div className="mt-2 text-xs leading-5 text-white/58">
+              {roleDesk ? `${roleDesk.focus.length} 个关注焦点` : copy.noRole}
+            </div>
+            <div className="mt-4 flex flex-wrap gap-2">
+              {roleDesk ? (
+                <button
+                  type="button"
+                  onClick={() => onEnterRoleDesk(roleDesk, selectedStarter.industryId)}
+                  className="inline-flex items-center gap-2 rounded-2xl border border-white/15 bg-white/10 px-4 py-2.5 text-xs font-semibold text-white transition-colors hover:bg-white/15"
+                >
+                  <ShieldCheck className="h-3.5 w-3.5" />
+                  {copy.role}
+                </button>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => onLaunchStarter(selectedStarter)}
+                className="inline-flex items-center gap-2 rounded-2xl bg-white px-4 py-2.5 text-xs font-semibold text-slate-950 transition-colors hover:bg-slate-100"
+              >
+                <PlayCircle className="h-3.5 w-3.5" />
+                {copy.launch}
+              </button>
+            </div>
           </div>
         </div>
       </div>
     </section>
+  );
+}
+
+function WorkspaceAppWidgetGrid({
+  appIds,
+  dockApps,
+  language,
+  appStateById,
+  onOpenApp,
+}: {
+  appIds: AppId[];
+  dockApps: AppId[];
+  language: InterfaceLanguage;
+  appStateById: Record<AppId, AppState>;
+  onOpenApp: (appId: AppId) => void;
+}) {
+  return (
+    <section className="mt-5 rounded-[30px] bg-[linear-gradient(145deg,rgba(6,10,18,0.58)_0%,rgba(15,23,42,0.5)_100%)] p-3.5 shadow-[0_20px_60px_rgba(0,0,0,0.14)] backdrop-blur-2xl sm:p-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-white/45">
+            Apps
+          </div>
+          <div className="mt-2 text-lg font-semibold text-white">桌面应用</div>
+          <div className="mt-1 text-sm text-white/62">
+            改回更紧凑的 App 排布，减少桌面噪音。
+          </div>
+        </div>
+        <div className="rounded-full bg-white/10 px-3 py-1.5 text-xs font-semibold text-white/80">
+          {appIds.length} 个工作组件
+        </div>
+      </div>
+
+      <div className="mt-3.5 grid grid-cols-2 gap-2.5 sm:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+        {appIds.map((appId) => {
+          const app = getApp(appId);
+          const Icon = app.icon;
+          const state = appStateById[appId];
+          const category =
+            getCategoryLabel(
+              appCatalog.find((item) => item.id === appId)?.category ?? "workflow",
+              language,
+            );
+          const isPinned = dockApps.includes(appId);
+          const isActive = state === "open" || state === "opening";
+          const isRunning = state !== "closed" && state !== "closing";
+
+          return (
+            <button
+              key={appId}
+              type="button"
+              onClick={() => onOpenApp(appId)}
+              className={[
+                "group flex h-full flex-col rounded-[22px] p-3 text-left transition-all",
+                isActive
+                  ? "bg-white/14 shadow-[0_14px_42px_rgba(0,0,0,0.18)] ring-1 ring-white/18"
+                  : "bg-black/12 hover:bg-white/10 hover:ring-1 hover:ring-white/12",
+              ].join(" ")}
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex h-10 w-10 items-center justify-center rounded-[16px] bg-white/10 text-white shadow-lg transition-transform group-hover:scale-[1.03]">
+                  <Icon className="h-4.5 w-4.5 text-white/88" />
+                </div>
+                <div className="flex flex-col items-end gap-1.5">
+                  {isPinned ? (
+                    <span className="rounded-full bg-sky-400/12 px-2 py-0.5 text-[10px] font-semibold text-sky-100">
+                      Dock
+                    </span>
+                  ) : null}
+                  <span className="rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-semibold text-white/72">
+                    {category}
+                  </span>
+                  {isRunning ? (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-emerald-400/12 px-2 py-0.5 text-[10px] font-semibold text-emerald-100">
+                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                      运行中
+                    </span>
+                  ) : null}
+                </div>
+              </div>
+
+              <div className="mt-2.5 text-[13px] font-semibold text-white">
+                {getAppShortName(appId, language)}
+              </div>
+              <div className="mt-1 text-[10px] leading-4 text-white/55">
+                {isActive ? "已展开" : "点击打开"}
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+type AgentSidebarMessage = {
+  id: string;
+  role: "assistant" | "user";
+  text: string;
+  error?: boolean;
+};
+
+type AgentSidebarSessionMeta = {
+  id: string;
+  title: string;
+  updatedAt: number;
+  lastMessage: string;
+};
+
+function AgentSidebar({
+  collapsed,
+  width,
+  language,
+  activeProvider,
+  scenarioTitle,
+  contextSummary,
+  onToggleCollapsed,
+  onResize,
+}: {
+  collapsed: boolean;
+  width: number;
+  language: InterfaceLanguage;
+  activeProvider: LlmProviderId;
+  scenarioTitle?: string;
+  contextSummary: string;
+  onToggleCollapsed: () => void;
+  onResize: (nextWidth: number) => void;
+}) {
+  const sessionsStorageKey = "agentcore.desktop.agent-sidebar.sessions.v1";
+  const activeSessionStorageKey = "agentcore.desktop.agent-sidebar.active-session.v1";
+  const buildMessageStorageKey = (sessionId: string) =>
+    `agentcore.desktop.agent-sidebar.messages.${sessionId}.v1`;
+  const createWelcomeMessage = (text?: string): AgentSidebarMessage => ({
+    id: `${Date.now()}-welcome`,
+    role: "assistant",
+    text:
+      text ||
+      "我是 AgentCore OS 助手。你可以直接让我拆任务、做调研、整理工作流，或给当前桌面下一步建议。",
+  });
+  const createSessionMeta = (title = "新对话"): AgentSidebarSessionMeta => ({
+    id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    title,
+    updatedAt: Date.now(),
+    lastMessage: "",
+  });
+
+  const [draft, setDraft] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [showSessionStrip, setShowSessionStrip] = useState(false);
+  const [showPromptStrip, setShowPromptStrip] = useState(false);
+  const [sessions, setSessions] = useState<AgentSidebarSessionMeta[]>(() => [createSessionMeta()]);
+  const [activeSessionId, setActiveSessionId] = useState("");
+  const [messages, setMessages] = useState<AgentSidebarMessage[]>(() => [createWelcomeMessage()]);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const rawSessions = window.localStorage.getItem(sessionsStorageKey);
+      const parsedSessions = rawSessions ? (JSON.parse(rawSessions) as AgentSidebarSessionMeta[]) : null;
+      const initialSessions =
+        Array.isArray(parsedSessions) && parsedSessions.length > 0
+          ? parsedSessions.slice(0, 12)
+          : [createSessionMeta("默认会话")];
+      setSessions(initialSessions);
+      const savedActive = window.localStorage.getItem(activeSessionStorageKey);
+      const resolvedActive =
+        savedActive && initialSessions.some((session) => session.id === savedActive)
+          ? savedActive
+          : initialSessions[0].id;
+      setActiveSessionId(resolvedActive);
+    } catch {
+      const fallback = [createSessionMeta("默认会话")];
+      setSessions(fallback);
+      setActiveSessionId(fallback[0].id);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!activeSessionId || typeof window === "undefined") return;
+    try {
+      const raw = window.localStorage.getItem(buildMessageStorageKey(activeSessionId));
+      const parsed = raw ? (JSON.parse(raw) as AgentSidebarMessage[]) : null;
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        setMessages(parsed.slice(-40));
+        return;
+      }
+    } catch {
+      // ignore
+    }
+    setMessages([createWelcomeMessage()]);
+  }, [activeSessionId]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(
+        sessionsStorageKey,
+        JSON.stringify(sessions.slice().sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 12)),
+      );
+      if (activeSessionId) {
+        window.localStorage.setItem(activeSessionStorageKey, activeSessionId);
+      }
+    } catch {
+      // ignore
+    }
+  }, [sessions, activeSessionId]);
+
+  useEffect(() => {
+    if (!activeSessionId || typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(
+        buildMessageStorageKey(activeSessionId),
+        JSON.stringify(messages.slice(-40)),
+      );
+    } catch {
+      // ignore
+    }
+  }, [activeSessionId, messages]);
+
+  useEffect(() => {
+    const node = scrollRef.current;
+    if (!node) return;
+    node.scrollTop = node.scrollHeight;
+  }, [messages, collapsed]);
+
+  const suggestions = useMemo(() => {
+    const displayLanguage = getDisplayLanguage(language);
+    if (displayLanguage === "en") {
+      return [
+        "Plan my top 3 actions for today",
+        "Audit this workspace for automation gaps",
+        "Turn this workflow into an SOP",
+      ];
+    }
+    if (displayLanguage === "ja") {
+      return [
+        "今日の優先アクションを3つに絞って",
+        "このワークスペースの自動化不足を点検して",
+        "このフローをSOPにして",
+      ];
+    }
+    return [
+      "帮我拆今天最重要的 3 个动作",
+      "检查这个工作台还有哪些自动化薄弱点",
+      "把当前流程整理成 SOP 清单",
+    ];
+  }, [language]);
+
+  const pinnedPrompts = useMemo(
+    () => [
+      {
+        id: "priority",
+        label: "今日优先级",
+        prompt: "根据当前工作台，帮我整理今天最重要的 3 个执行动作，并说明先后顺序。",
+      },
+      {
+        id: "automation",
+        label: "自动化排查",
+        prompt: "请审视当前工作台和流程，指出最值得优先补齐的自动化薄弱点。",
+      },
+      {
+        id: "sop",
+        label: "SOP 生成",
+        prompt: "把当前这套工作流整理成简明 SOP，要求能直接交给团队执行。",
+      },
+    ],
+    [],
+  );
+
+  const activeSession = sessions.find((session) => session.id === activeSessionId) ?? null;
+
+  const clearConversation = () => {
+    setMessages([createWelcomeMessage("已清空当前会话。你可以继续基于当前工作台提问。")]);
+    if (!activeSessionId) return;
+    setSessions((prev) =>
+      prev.map((session) =>
+        session.id === activeSessionId
+          ? { ...session, title: "新对话", updatedAt: Date.now(), lastMessage: "" }
+          : session,
+      ),
+    );
+  };
+
+  const createNewSession = () => {
+    const next = createSessionMeta("新对话");
+    setSessions((prev) => [next, ...prev].slice(0, 12));
+    setActiveSessionId(next.id);
+    setMessages([createWelcomeMessage("已创建一个新的对话会话。")]);
+  };
+
+  const deleteSession = (sessionId: string) => {
+    const remaining = sessions.filter((session) => session.id !== sessionId);
+    if (typeof window !== "undefined") {
+      try {
+        window.localStorage.removeItem(buildMessageStorageKey(sessionId));
+      } catch {
+        // ignore
+      }
+    }
+    if (remaining.length === 0) {
+      const fallback = createSessionMeta("新对话");
+      setSessions([fallback]);
+      setActiveSessionId(fallback.id);
+      setMessages([createWelcomeMessage()]);
+      return;
+    }
+    setSessions(remaining);
+    if (activeSessionId === sessionId) {
+      setActiveSessionId(remaining[0].id);
+    }
+  };
+
+  const insertContextIntoDraft = () => {
+    setDraft((prev) => {
+      const next = prev.trim();
+      return [next, "## 当前工作台上下文", contextSummary]
+        .filter(Boolean)
+        .join(next ? "\n\n" : "\n");
+    });
+  };
+
+  const sendMessage = async (raw?: string) => {
+    const text = (raw ?? draft).trim();
+    if (!text || loading) return;
+
+    const userMessage: AgentSidebarMessage = {
+      id: `${Date.now()}-user`,
+      role: "user",
+      text,
+    };
+    const runningTaskId = createTask({
+      name: "Agent Sidebar Chat",
+      status: "running",
+      detail: text.slice(0, 80),
+    });
+
+    setMessages((prev) => [...prev, userMessage]);
+    setSessions((prev) =>
+      prev
+        .map((session) =>
+          session.id === activeSessionId
+            ? {
+                ...session,
+                title: session.title === "新对话" ? text.slice(0, 18) : session.title,
+                updatedAt: Date.now(),
+                lastMessage: text.slice(0, 60),
+              }
+            : session,
+        )
+        .sort((a, b) => b.updatedAt - a.updatedAt),
+    );
+    setDraft("");
+    setLoading(true);
+
+    try {
+      const reply = await requestOpenClawAgent({
+        message: text,
+        sessionId: `webos-desktop-agent-sidebar-${activeSessionId || "main"}`,
+        timeoutSeconds: 45,
+      });
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `${Date.now()}-assistant`,
+          role: "assistant",
+          text: reply || "（没有返回内容）",
+        },
+      ]);
+      setSessions((prev) =>
+        prev
+          .map((session) =>
+            session.id === activeSessionId
+              ? {
+                  ...session,
+                  updatedAt: Date.now(),
+                  lastMessage: (reply || "（没有返回内容）").slice(0, 60),
+                }
+              : session,
+          )
+          .sort((a, b) => b.updatedAt - a.updatedAt),
+      );
+      updateTask(runningTaskId, { status: "done", detail: "对话完成" });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "请求失败";
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `${Date.now()}-error`,
+          role: "assistant",
+          text: message,
+          error: true,
+        },
+      ]);
+      setSessions((prev) =>
+        prev
+          .map((session) =>
+            session.id === activeSessionId
+              ? {
+                  ...session,
+                  updatedAt: Date.now(),
+                  lastMessage: message.slice(0, 60),
+                }
+              : session,
+          )
+          .sort((a, b) => b.updatedAt - a.updatedAt),
+      );
+      updateTask(runningTaskId, { status: "error", detail: message });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const startResize = (event: React.PointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = width;
+
+    const handleMove = (moveEvent: PointerEvent) => {
+      const delta = startX - moveEvent.clientX;
+      onResize(startWidth + delta);
+    };
+
+    const handleUp = () => {
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleUp);
+    };
+
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", handleUp);
+  };
+
+  if (collapsed) {
+    return (
+      <aside className="absolute bottom-28 right-4 z-[45]">
+        <button
+          type="button"
+          onClick={onToggleCollapsed}
+          className="group inline-flex items-center gap-3 rounded-[22px] bg-[linear-gradient(180deg,rgba(7,12,24,0.9)_0%,rgba(10,17,32,0.82)_100%)] px-4 py-3 text-white shadow-[0_24px_70px_rgba(0,0,0,0.3)] backdrop-blur-2xl transition-transform hover:-translate-y-0.5"
+          title="展开聊天"
+          aria-label="展开聊天"
+        >
+          <AgentCoreLogoMark size={40} roundedClassName="rounded-2xl" />
+          <span className="flex flex-col items-start">
+            <span className="text-sm font-semibold text-white">聊天</span>
+            <span className="inline-flex items-center gap-1.5 text-[11px] text-white/58">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+              {providerLabel(activeProvider)}
+            </span>
+          </span>
+        </button>
+      </aside>
+    );
+  }
+
+  return (
+    <aside
+      className="absolute bottom-24 right-4 top-20 z-[45] flex flex-col overflow-hidden rounded-[26px] bg-[linear-gradient(180deg,rgba(7,12,24,0.92)_0%,rgba(15,23,42,0.86)_58%,rgba(11,18,32,0.82)_100%)] shadow-[0_24px_72px_rgba(0,0,0,0.28)] backdrop-blur-2xl"
+      style={{ width }}
+    >
+      <div
+        className="absolute inset-y-0 left-0 z-10 w-2 cursor-col-resize"
+        onPointerDown={startResize}
+        aria-hidden="true"
+      />
+
+      <div className="flex items-start justify-between gap-2.5 border-b border-white/10 px-3 py-3">
+        <div className="min-w-0">
+          <div className="inline-flex items-center gap-2 rounded-full bg-white/10 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-white/72">
+            <AgentCoreLogoMark size={22} roundedClassName="rounded-[8px]" />
+            聊天
+          </div>
+          <div className="mt-2 text-[13px] font-semibold text-white">随时对话</div>
+          <div className="mt-0.5 text-[11px] leading-4 text-white/58">
+            {scenarioTitle ? `当前工作台：${scenarioTitle}` : "当前工作台未固定"} · {providerLabel(activeProvider)}
+          </div>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={createNewSession}
+            className="rounded-xl border border-white/10 bg-white/10 px-2.5 py-1.5 text-[10px] font-semibold text-white/82 transition-colors hover:bg-white/15"
+          >
+            新建
+          </button>
+          <button
+            type="button"
+            onClick={onToggleCollapsed}
+            className="flex h-8 w-8 items-center justify-center rounded-xl border border-white/10 bg-white/10 text-white/82 transition-colors hover:bg-white/15"
+            title="折叠侧栏"
+            aria-label="折叠侧栏"
+          >
+            <ChevronDown className="h-3.5 w-3.5 -rotate-90" />
+          </button>
+        </div>
+      </div>
+
+      <div className="border-b border-white/10 px-3 py-2.5">
+        <div className="space-y-2">
+          <div className="rounded-[18px] bg-white/[0.05] p-1.5">
+            <div className="flex items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={() => setShowSessionStrip((prev) => !prev)}
+                className="inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-white/58 transition-colors hover:text-white"
+              >
+                {showSessionStrip ? (
+                  <ChevronUp className="h-3.5 w-3.5" />
+                ) : (
+                  <ChevronDown className="h-3.5 w-3.5" />
+                )}
+                会话
+                <span className="rounded-full bg-white/10 px-2 py-0.5 text-[10px] text-white/56">
+                  {sessions.length}
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={clearConversation}
+                className="text-[11px] font-semibold text-white/62 transition-colors hover:text-white"
+              >
+                清空当前
+              </button>
+            </div>
+            {showSessionStrip ? (
+              <div className="mt-2.5 space-y-2">
+                {sessions.slice(0, 3).map((session) => {
+                  const active = session.id === activeSessionId;
+                  return (
+                    <div
+                      key={session.id}
+                      className={[
+                        "rounded-2xl border px-3 py-2",
+                        active ? "border-white/20 bg-white/14" : "border-white/10 bg-white/6",
+                      ].join(" ")}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => setActiveSessionId(session.id)}
+                        className="w-full text-left"
+                      >
+                        <div className="truncate text-xs font-semibold text-white">
+                          {session.title || "新对话"}
+                        </div>
+                        <div className="mt-1 line-clamp-2 text-[11px] leading-5 text-white/52">
+                          {session.lastMessage || "暂无消息"}
+                        </div>
+                      </button>
+                      <div className="mt-2 flex justify-end">
+                        <button
+                          type="button"
+                          onClick={() => deleteSession(session.id)}
+                          className="text-[10px] font-semibold text-white/45 transition-colors hover:text-white/80"
+                        >
+                          删除
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : null}
+          </div>
+
+          <div className="rounded-[18px] bg-white/[0.05] p-1.5">
+            <div className="flex items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={() => setShowPromptStrip((prev) => !prev)}
+                className="inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-white/58 transition-colors hover:text-white"
+              >
+                {showPromptStrip ? (
+                  <ChevronUp className="h-3.5 w-3.5" />
+                ) : (
+                  <ChevronDown className="h-3.5 w-3.5" />
+                )}
+                常用
+                <span className="rounded-full bg-white/10 px-2 py-0.5 text-[10px] text-white/56">
+                  {pinnedPrompts.length + suggestions.length}
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={insertContextIntoDraft}
+                className="rounded-full border border-white/10 bg-white/8 px-2.5 py-1 text-[10px] font-semibold text-white/76 transition-colors hover:bg-white/14"
+              >
+                插入上下文
+              </button>
+            </div>
+            {showPromptStrip ? (
+              <div className="mt-2.5 flex flex-wrap gap-2">
+                {[...pinnedPrompts.map((item) => item.label), ...suggestions].map((item) => (
+                  <button
+                    key={item}
+                    type="button"
+                    onClick={() => {
+                      const preset = pinnedPrompts.find((prompt) => prompt.label === item);
+                      void sendMessage(preset?.prompt ?? item);
+                    }}
+                    className="rounded-full border border-white/10 bg-white/8 px-3 py-1.5 text-[11px] font-semibold text-white/78 transition-colors hover:bg-white/14"
+                  >
+                    {item}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      </div>
+
+      <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-3">
+        <div className="space-y-3">
+          {messages.map((message) => (
+            <div
+              key={message.id}
+              className={[
+                "max-w-[92%] rounded-[20px] border px-3 py-2.5 text-[13px] leading-6 shadow-sm",
+                message.role === "user"
+                  ? "ml-auto border-sky-200/30 bg-sky-400/12 text-white"
+                  : message.error
+                    ? "border-rose-300/30 bg-rose-400/10 text-rose-50"
+                    : "border-white/10 bg-white/8 text-white/86",
+              ].join(" ")}
+            >
+              {message.text}
+            </div>
+          ))}
+          {loading ? (
+            <div className="max-w-[92%] rounded-[20px] border border-white/10 bg-white/8 px-3 py-2.5 text-[13px] text-white/65">
+              正在处理...
+            </div>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="border-t border-white/10 px-3 py-3">
+        <div className="rounded-[20px] border border-white/10 bg-black/14 p-2.5">
+          <div className="mb-2.5 rounded-[16px] border border-white/8 bg-white/6 px-3 py-1.5 text-[10px] leading-5 text-white/52">
+            当前会话：{activeSession?.title || "新对话"}
+          </div>
+          <textarea
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                void sendMessage();
+              }
+            }}
+            rows={3}
+            placeholder="直接提问，例如：根据当前工作台，帮我给今天排一个执行顺序。"
+            className="w-full resize-none bg-transparent text-[13px] leading-5 text-white outline-none placeholder:text-white/35"
+          />
+          <div className="mt-2.5 flex items-center justify-between gap-3">
+            <div className="text-[10px] leading-4 text-white/48">
+              `Enter` 发送，`Shift + Enter` 换行
+            </div>
+            <button
+              type="button"
+              disabled={loading || !draft.trim()}
+              onClick={() => void sendMessage()}
+              className="inline-flex items-center gap-1.5 rounded-2xl bg-white px-3 py-1.5 text-[10px] font-semibold text-slate-950 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-45"
+            >
+              <ArrowRight className="h-3 w-3" />
+              发送
+            </button>
+          </div>
+        </div>
+      </div>
+    </aside>
   );
 }
 
@@ -1695,6 +2216,7 @@ function providerLabel(id: LlmProviderId) {
     kimi: "Kimi (Moonshot)",
     deepseek: "DeepSeek",
     openai: "OpenAI",
+    anthropic: "Claude (Anthropic)",
     qwen: "通义千问",
   };
   return map[id];
@@ -1902,6 +2424,44 @@ function LanguageWelcomeCard({
   );
 }
 
+function RuntimeOnboardingCard({
+  onChooseLightRuntime,
+  onOpenEngineSettings,
+}: {
+  onChooseLightRuntime: () => void;
+  onOpenEngineSettings: () => void;
+}) {
+  return (
+    <div className="absolute inset-0 z-[160] flex items-center justify-center bg-black/45 p-4 backdrop-blur-md">
+      <div className="w-full max-w-md rounded-[32px] border border-white/15 bg-[linear-gradient(180deg,rgba(8,12,24,0.96)_0%,rgba(17,24,39,0.98)_100%)] p-6 shadow-[0_36px_120px_rgba(0,0,0,0.45)] sm:p-8">
+        <div className="flex justify-center">
+          <AgentCoreLogoMark size={28} roundedClassName="rounded-[10px]" />
+        </div>
+
+        <div className="mt-6 space-y-3">
+          <button
+            type="button"
+            onClick={onChooseLightRuntime}
+            className="flex w-full items-center justify-between rounded-[24px] border border-emerald-200/20 bg-[linear-gradient(135deg,rgba(16,185,129,0.2)_0%,rgba(255,255,255,0.05)_100%)] px-5 py-4 text-left transition-colors hover:bg-[linear-gradient(135deg,rgba(16,185,129,0.26)_0%,rgba(255,255,255,0.08)_100%)]"
+          >
+            <span className="text-base font-semibold text-white">进入轻量级桌面</span>
+            <ArrowRight className="h-4 w-4 text-emerald-100" />
+          </button>
+
+          <button
+            type="button"
+            onClick={onOpenEngineSettings}
+            className="flex w-full items-center justify-between rounded-[24px] border border-white/12 bg-white/6 px-5 py-4 text-left transition-colors hover:bg-white/10"
+          >
+            <span className="text-base font-semibold text-white">配置桌面</span>
+            <ArrowRight className="h-4 w-4 text-white/75" />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ModelCapsule({
   value,
   language,
@@ -2009,13 +2569,13 @@ function DockIcon({
         onClick();
       }}
       className={[
-        "relative w-14 h-14 rounded-2xl flex items-center justify-center transition-all",
+        "relative flex h-10 w-10 items-center justify-center rounded-[16px] transition-all sm:h-11 sm:w-11",
         active ? "bg-white/20" : "hover:bg-white/10",
       ].join(" ")}
     >
       {children}
       {running && (
-        <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 h-1 w-4 rounded-full bg-white/70" />
+        <span className="absolute -bottom-1 left-1/2 h-1 w-3 -translate-x-1/2 rounded-full bg-white/70" />
       )}
     </button>
   );
@@ -2047,6 +2607,49 @@ function ModeSwitcher({
       <div className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-white/80">
         <span className="text-[10px]">▼</span>
       </div>
+    </div>
+  );
+}
+
+function AgentCoreBrand() {
+  return (
+    <div className="flex min-w-0 items-center gap-2.5 rounded-full border border-white/12 bg-white/8 px-2 py-1.5 backdrop-blur-xl">
+      <AgentCoreLogoMark size={32} roundedClassName="rounded-[12px]" />
+      <div className="min-w-0 leading-none">
+        <div className="truncate text-[11px] font-semibold uppercase tracking-[0.18em] text-white/95">
+          AgentCore OS
+        </div>
+        <div className="truncate text-[10px] text-white/60">
+          Business Solution Operating System
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AgentCoreLogoMark({
+  size = 32,
+  roundedClassName = "rounded-[12px]",
+}: {
+  size?: number;
+  roundedClassName?: string;
+}) {
+  return (
+    <div
+      className={[
+        "relative shrink-0 overflow-hidden ring-1 ring-white/18 shadow-[0_10px_24px_rgba(36,118,255,0.28)]",
+        roundedClassName,
+      ].join(" ")}
+      style={{ width: size, height: size }}
+    >
+      <Image
+        src="/agentcore-logo.png"
+        alt="AgentCore OS"
+        fill
+        sizes={`${size}px`}
+        className="object-cover"
+        priority
+      />
     </div>
   );
 }
