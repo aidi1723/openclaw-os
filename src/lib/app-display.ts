@@ -1,12 +1,24 @@
 import type { AppId, ModeId } from "@/apps/types";
 import type { InterfaceLanguage } from "@/lib/settings";
 
-type AppCategory = "insight" | "workflow" | "content" | "relationship" | "personal" | "system";
+export type AppCategory =
+  | "insight"
+  | "workflow"
+  | "content"
+  | "relationship"
+  | "personal"
+  | "system";
 
 type CopySet = {
   zh: string;
   en: string;
   ja: string;
+};
+
+type CategoryCopy = {
+  label: CopySet;
+  description: CopySet;
+  helper: CopySet;
 };
 
 const appNames: Record<AppId, CopySet> = {
@@ -109,6 +121,98 @@ export const appCatalog: Array<{ id: AppId; category: AppCategory }> = [
   { id: "settings", category: "system" },
 ];
 
+const categoryOrder: AppCategory[] = [
+  "workflow",
+  "insight",
+  "content",
+  "relationship",
+  "personal",
+  "system",
+];
+
+const categoryCopyMap: Record<AppCategory, CategoryCopy> = {
+  insight: {
+    label: { zh: "信息与洞察", en: "Insight", ja: "インサイト" },
+    description: {
+      zh: "聚合研究、情报扫描和知识沉淀，适合需要持续查看的新信息入口。",
+      en: "Research, signal scanning, and knowledge capture for staying on top of new information.",
+      ja: "調査、シグナル監視、知識蓄積をまとめた継続閲覧向けカテゴリです。",
+    },
+    helper: {
+      zh: "建议优先放在桌面主区，方便持续追踪。",
+      en: "Best placed on the desktop for continuous monitoring.",
+      ja: "継続確認しやすいよう、デスクトップ常駐向きです。",
+    },
+  },
+  workflow: {
+    label: { zh: "流程与执行", en: "Workflow", ja: "ワークフロー" },
+    description: {
+      zh: "覆盖任务推进、会议协同和运营执行，是最适合日常高频打开的工作区。",
+      en: "Task execution, meeting coordination, and day-to-day operations.",
+      ja: "タスク推進、会議連携、日常運用を担う高頻度ワークスペースです。",
+    },
+    helper: {
+      zh: "推荐同时放入 Desktop 和 Dock，便于快速切换。",
+      en: "Usually worth pinning to both the desktop and the dock.",
+      ja: "Desktop と Dock の両方に置くと切り替えやすくなります。",
+    },
+  },
+  content: {
+    label: { zh: "内容与发布", en: "Content", ja: "コンテンツ" },
+    description: {
+      zh: "负责写作、视觉制作、内容改写和分发，适合围绕产出链路集中排布。",
+      en: "Writing, creative production, repurposing, and publishing in one lane.",
+      ja: "執筆、制作、再利用、配信をまとめたアウトプット向けカテゴリです。",
+    },
+    helper: {
+      zh: "建议按创作流程摆放，减少来回跳转。",
+      en: "Arrange these in creation order to reduce context switching.",
+      ja: "制作フロー順に並べると往復が減ります。",
+    },
+  },
+  relationship: {
+    label: { zh: "客户与沟通", en: "Relationship", ja: "コミュニケーション" },
+    description: {
+      zh: "面向客户、线索、邮件和服务沟通，适合与执行类应用搭配使用。",
+      en: "Customer, lead, email, and support tools that pair well with execution apps.",
+      ja: "顧客、リード、メール、サポート連携向けのコミュニケーションカテゴリです。",
+    },
+    helper: {
+      zh: "Dock 保留高频入口，桌面保留需要持续处理的应用即可。",
+      en: "Keep high-frequency entry points in the dock and only persistent work on the desktop.",
+      ja: "高頻度入口は Dock、継続処理が必要なものだけ Desktop に残すのが適切です。",
+    },
+  },
+  personal: {
+    label: { zh: "个人与家庭", en: "Personal", ja: "パーソナル" },
+    description: {
+      zh: "涵盖学习、习惯、健康和家庭安排，适合做轻量常驻区。",
+      en: "Learning, habits, health, and family routines in a lighter personal zone.",
+      ja: "学習、習慣、健康、家族予定を扱う軽量常駐カテゴリです。",
+    },
+    helper: {
+      zh: "桌面保留 1-2 个真正常用入口即可。",
+      en: "Usually one or two always-visible apps are enough here.",
+      ja: "常駐は 1〜2 個に絞ると見通しが保てます。",
+    },
+  },
+  system: {
+    label: { zh: "系统与设置", en: "System", ja: "システム" },
+    description: {
+      zh: "包含账号、授权、控制台和系统设置，主要承担管理入口职责。",
+      en: "Account, authorization, console, and settings entry points.",
+      ja: "アカウント、認証、コンソール、設定など管理入口をまとめます。",
+    },
+    helper: {
+      zh: "通常保留在 Dock 即可，避免占用主桌面。",
+      en: "These usually belong in the dock instead of the main desktop.",
+      ja: "通常はメインデスクトップより Dock 配置が向いています。",
+    },
+  },
+};
+
+const appCategoryMap = new Map(appCatalog.map((item) => [item.id, item.category]));
+
 export function getDisplayLanguage(language: InterfaceLanguage) {
   if (language === "zh-CN") return "zh";
   if (language === "ja-JP") return "ja";
@@ -151,15 +255,29 @@ export function getCategoryLabel(
   language: InterfaceLanguage = "zh-CN",
 ) {
   const displayLanguage = getDisplayLanguage(language);
-  const map: Record<AppCategory, CopySet> = {
-    insight: { zh: "信息与洞察", en: "Insight", ja: "インサイト" },
-    workflow: { zh: "流程与执行", en: "Workflow", ja: "ワークフロー" },
-    content: { zh: "内容与发布", en: "Content", ja: "コンテンツ" },
-    relationship: { zh: "客户与沟通", en: "Relationship", ja: "コミュニケーション" },
-    personal: { zh: "个人与家庭", en: "Personal", ja: "パーソナル" },
-    system: { zh: "系统与设置", en: "System", ja: "システム" },
+  return categoryCopyMap[category].label[displayLanguage];
+}
+
+export function getAppCategory(appId: AppId): AppCategory {
+  return appCategoryMap.get(appId) ?? "workflow";
+}
+
+export function getCategoryMeta(
+  category: AppCategory,
+  language: InterfaceLanguage = "zh-CN",
+) {
+  const displayLanguage = getDisplayLanguage(language);
+  const copy = categoryCopyMap[category];
+  return {
+    id: category,
+    label: copy.label[displayLanguage],
+    description: copy.description[displayLanguage],
+    helper: copy.helper[displayLanguage],
   };
-  return map[category][displayLanguage];
+}
+
+export function listCategoryMetas(language: InterfaceLanguage = "zh-CN") {
+  return categoryOrder.map((category) => getCategoryMeta(category, language));
 }
 
 export function resolveLanguageLocale(language: InterfaceLanguage) {

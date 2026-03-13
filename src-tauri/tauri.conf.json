@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "AgentCore OS",
-  "version": "0.1.0",
+  "version": "0.2.0-beta.2",
   "identifier": "com.agentcore.os",
   "build": {
     "beforeBuildCommand": "npm run build:desktop-web",

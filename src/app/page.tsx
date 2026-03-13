@@ -27,9 +27,9 @@ import { SystemTrayWindows } from "@/components/SystemTrayWindows";
 import { PublishQueueRunner } from "@/components/PublishQueueRunner";
 import { requestOpenClawAgent } from "@/lib/openclaw-agent-client";
 import {
-  appCatalog,
   getAppDisplayName,
-  getCategoryLabel,
+  getAppCategory,
+  getCategoryMeta,
   getDisplayLanguage,
   getModeDisplayName,
   getShellLabel,
@@ -608,18 +608,12 @@ export default function Home() {
   const interfaceLanguage = personalization.interfaceLanguage;
   const desktopApps = useMemo(() => {
     if (!personalization.useCustomWorkspace) return mode.desktopApps;
-    if (personalization.customDesktopApps.length > 0) {
-      return personalization.customDesktopApps;
-    }
-    return workspaceScenario?.desktopApps ?? mode.desktopApps;
-  }, [mode.desktopApps, personalization, workspaceScenario]);
+    return personalization.customDesktopApps;
+  }, [mode.desktopApps, personalization.customDesktopApps, personalization.useCustomWorkspace]);
   const dockApps = useMemo(() => {
     if (!personalization.useCustomWorkspace) return mode.dockApps;
-    if (personalization.customDockApps.length > 0) {
-      return personalization.customDockApps;
-    }
-    return workspaceScenario?.dockApps ?? mode.dockApps;
-  }, [mode.dockApps, personalization, workspaceScenario]);
+    return personalization.customDockApps;
+  }, [mode.dockApps, personalization.customDockApps, personalization.useCustomWorkspace]);
   const isAnyAppVisible = Object.values(appStateById).some(
     (s) => s === "opening" || s === "open",
   );
@@ -1130,6 +1124,15 @@ function getAppShortName(appId: AppId, language: InterfaceLanguage) {
   return fullName.length > 14 ? `${fullName.slice(0, 14)}…` : fullName;
 }
 
+const workspaceCategoryOrder = [
+  "workflow",
+  "insight",
+  "content",
+  "relationship",
+  "personal",
+  "system",
+] as const;
+
 function SolutionCenterPanel({
   language,
   starters,
@@ -1554,6 +1557,38 @@ function WorkspaceAppWidgetGrid({
   appStateById: Record<AppId, AppState>;
   onOpenApp: (appId: AppId) => void;
 }) {
+  const groupedApps = useMemo(() => {
+    const grouped = new Map<(typeof workspaceCategoryOrder)[number], AppId[]>();
+    for (const appId of appIds) {
+      const category = getAppCategory(appId);
+      const items = grouped.get(category) ?? [];
+      items.push(appId);
+      grouped.set(category, items);
+    }
+
+    return workspaceCategoryOrder
+      .map((category) => {
+        const items = grouped.get(category);
+        if (!items?.length) return null;
+        return {
+          category,
+          meta: getCategoryMeta(category, language),
+          appIds: [...items].sort((left, right) => {
+            const leftPinned = dockApps.includes(left) ? 1 : 0;
+            const rightPinned = dockApps.includes(right) ? 1 : 0;
+            if (leftPinned !== rightPinned) return rightPinned - leftPinned;
+            return getAppDisplayName(left, left, language).localeCompare(
+              getAppDisplayName(right, right, language),
+              language === "zh-CN" ? "zh-CN" : language === "ja-JP" ? "ja-JP" : "en-US",
+            );
+          }),
+        };
+      })
+      .filter((group): group is NonNullable<typeof group> => Boolean(group));
+  }, [appIds, dockApps, language]);
+
+  const dockCount = new Set(dockApps).size;
+
   return (
     <section className="mt-5 rounded-[30px] bg-[linear-gradient(145deg,rgba(6,10,18,0.58)_0%,rgba(15,23,42,0.5)_100%)] p-3.5 shadow-[0_20px_60px_rgba(0,0,0,0.14)] backdrop-blur-2xl sm:p-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
@@ -1563,71 +1598,101 @@ function WorkspaceAppWidgetGrid({
           </div>
           <div className="mt-2 text-lg font-semibold text-white">桌面应用</div>
           <div className="mt-1 text-sm text-white/62">
-            改回更紧凑的 App 排布，减少桌面噪音。
+            按工作类型分区展示，减少重复标签和桌面噪音。
           </div>
         </div>
-        <div className="rounded-full bg-white/10 px-3 py-1.5 text-xs font-semibold text-white/80">
-          {appIds.length} 个工作组件
+        <div className="flex flex-wrap gap-2">
+          <div className="rounded-full bg-white/10 px-3 py-1.5 text-xs font-semibold text-white/80">
+            {appIds.length} 个工作组件
+          </div>
+          <div className="rounded-full bg-white/10 px-3 py-1.5 text-xs font-semibold text-white/70">
+            {groupedApps.length} 个分区
+          </div>
+          <div className="rounded-full bg-sky-400/12 px-3 py-1.5 text-xs font-semibold text-sky-100">
+            Dock {dockCount}
+          </div>
         </div>
       </div>
 
-      <div className="mt-3.5 grid grid-cols-2 gap-2.5 sm:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
-        {appIds.map((appId) => {
-          const app = getApp(appId);
-          const Icon = app.icon;
-          const state = appStateById[appId];
-          const category =
-            getCategoryLabel(
-              appCatalog.find((item) => item.id === appId)?.category ?? "workflow",
-              language,
-            );
-          const isPinned = dockApps.includes(appId);
-          const isActive = state === "open" || state === "opening";
-          const isRunning = state !== "closed" && state !== "closing";
-
-          return (
-            <button
-              key={appId}
-              type="button"
-              onClick={() => onOpenApp(appId)}
-              className={[
-                "group flex h-full flex-col rounded-[22px] p-3 text-left transition-all",
-                isActive
-                  ? "bg-white/14 shadow-[0_14px_42px_rgba(0,0,0,0.18)] ring-1 ring-white/18"
-                  : "bg-black/12 hover:bg-white/10 hover:ring-1 hover:ring-white/12",
-              ].join(" ")}
-            >
-              <div className="flex items-start justify-between gap-2">
-                <div className="flex h-10 w-10 items-center justify-center rounded-[16px] bg-white/10 text-white shadow-lg transition-transform group-hover:scale-[1.03]">
-                  <Icon className="h-4.5 w-4.5 text-white/88" />
-                </div>
-                <div className="flex flex-col items-end gap-1.5">
-                  {isPinned ? (
-                    <span className="rounded-full bg-sky-400/12 px-2 py-0.5 text-[10px] font-semibold text-sky-100">
-                      Dock
-                    </span>
-                  ) : null}
-                  <span className="rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-semibold text-white/72">
-                    {category}
-                  </span>
-                  {isRunning ? (
-                    <span className="inline-flex items-center gap-1 rounded-full bg-emerald-400/12 px-2 py-0.5 text-[10px] font-semibold text-emerald-100">
-                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-                      运行中
-                    </span>
-                  ) : null}
+      <div className="mt-4 space-y-4">
+        {groupedApps.map((group) => (
+          <div
+            key={group.category}
+            className="rounded-[26px] border border-white/10 bg-white/[0.03] p-3.5"
+          >
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <div className="text-sm font-semibold text-white">{group.meta.label}</div>
+                <div className="mt-1 text-xs leading-5 text-white/58">
+                  {group.meta.description}
                 </div>
               </div>
+              <div className="flex flex-wrap gap-2">
+                <span className="rounded-full bg-white/10 px-3 py-1 text-[11px] font-semibold text-white/75">
+                  {group.appIds.length} 个应用
+                </span>
+                <span className="rounded-full bg-white/8 px-3 py-1 text-[11px] font-semibold text-white/60">
+                  {group.meta.helper}
+                </span>
+              </div>
+            </div>
 
-              <div className="mt-2.5 text-[13px] font-semibold text-white">
-                {getAppShortName(appId, language)}
-              </div>
-              <div className="mt-1 text-[10px] leading-4 text-white/55">
-                {isActive ? "已展开" : "点击打开"}
-              </div>
-            </button>
-          );
-        })}
+            <div className="mt-3.5 grid grid-cols-2 gap-2.5 sm:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+              {group.appIds.map((appId) => {
+                const app = getApp(appId);
+                const Icon = app.icon;
+                const state = appStateById[appId];
+                const isPinned = dockApps.includes(appId);
+                const isActive = state === "open" || state === "opening";
+                const isRunning = state !== "closed" && state !== "closing";
+
+                return (
+                  <button
+                    key={appId}
+                    type="button"
+                    onClick={() => onOpenApp(appId)}
+                    className={[
+                      "group flex h-full flex-col rounded-[22px] p-3 text-left transition-all",
+                      isActive
+                        ? "bg-white/14 shadow-[0_14px_42px_rgba(0,0,0,0.18)] ring-1 ring-white/18"
+                        : "bg-black/12 hover:bg-white/10 hover:ring-1 hover:ring-white/12",
+                    ].join(" ")}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-[16px] bg-white/10 text-white shadow-lg transition-transform group-hover:scale-[1.03]">
+                        <Icon className="h-4.5 w-4.5 text-white/88" />
+                      </div>
+                      <div className="flex flex-col items-end gap-1.5">
+                        {isPinned ? (
+                          <span className="rounded-full bg-sky-400/12 px-2 py-0.5 text-[10px] font-semibold text-sky-100">
+                            Dock
+                          </span>
+                        ) : null}
+                        {isRunning ? (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-400/12 px-2 py-0.5 text-[10px] font-semibold text-emerald-100">
+                            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                            运行中
+                          </span>
+                        ) : null}
+                      </div>
+                    </div>
+
+                    <div className="mt-2.5 text-[13px] font-semibold text-white">
+                      {getAppShortName(appId, language)}
+                    </div>
+                    <div className="mt-1 text-[10px] leading-4 text-white/55">
+                      {isActive
+                        ? "已展开，继续回到当前任务"
+                        : isPinned
+                          ? "已固定到 Dock，点击快速打开"
+                          : "点击打开"}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ))}
       </div>
     </section>
   );
@@ -1646,6 +1711,90 @@ type AgentSidebarSessionMeta = {
   updatedAt: number;
   lastMessage: string;
 };
+
+const AGENT_SIDEBAR_MAX_SESSIONS = 40;
+const AGENT_SIDEBAR_MAX_MESSAGES = 120;
+const AGENT_SIDEBAR_MESSAGE_KEY_PREFIX = "agentcore.desktop.agent-sidebar.messages.";
+const AGENT_SIDEBAR_MESSAGE_KEY_SUFFIX = ".v1";
+
+function normalizeAgentSidebarSessions(sessions: AgentSidebarSessionMeta[]) {
+  const deduped = new Map<string, AgentSidebarSessionMeta>();
+  for (const session of sessions) {
+    if (!session?.id) continue;
+    deduped.set(session.id, session);
+  }
+  return Array.from(deduped.values())
+    .sort((left, right) => right.updatedAt - left.updatedAt)
+    .slice(0, AGENT_SIDEBAR_MAX_SESSIONS);
+}
+
+function extractAgentSidebarMessageTimestamp(message: AgentSidebarMessage) {
+  const match = message.id.match(/^(\d+)/);
+  const timestamp = Number(match?.[1] ?? "");
+  return Number.isFinite(timestamp) && timestamp > 0 ? timestamp : 0;
+}
+
+function recoverAgentSidebarSessionsFromStorage(storage: Storage) {
+  const recovered: AgentSidebarSessionMeta[] = [];
+  for (let index = 0; index < storage.length; index += 1) {
+    const key = storage.key(index);
+    if (
+      !key ||
+      !key.startsWith(AGENT_SIDEBAR_MESSAGE_KEY_PREFIX) ||
+      !key.endsWith(AGENT_SIDEBAR_MESSAGE_KEY_SUFFIX)
+    ) {
+      continue;
+    }
+
+    const sessionId = key.slice(
+      AGENT_SIDEBAR_MESSAGE_KEY_PREFIX.length,
+      key.length - AGENT_SIDEBAR_MESSAGE_KEY_SUFFIX.length,
+    );
+    if (!sessionId) continue;
+
+    try {
+      const raw = storage.getItem(key);
+      const parsed = raw ? (JSON.parse(raw) as AgentSidebarMessage[]) : null;
+      if (!Array.isArray(parsed) || parsed.length === 0) continue;
+
+      const firstUserMessage = parsed.find((message) => message.role === "user" && message.text.trim());
+      const lastMessage = [...parsed]
+        .reverse()
+        .find((message) => message.text.trim());
+      const updatedAt =
+        parsed.reduce(
+          (latest, message) => Math.max(latest, extractAgentSidebarMessageTimestamp(message)),
+          0,
+        ) || Date.now();
+
+      recovered.push({
+        id: sessionId,
+        title: firstUserMessage?.text.slice(0, 18) || "恢复的会话",
+        updatedAt,
+        lastMessage: lastMessage?.text.slice(0, 60) || "",
+      });
+    } catch {
+      // ignore malformed orphaned session payloads
+    }
+  }
+
+  return normalizeAgentSidebarSessions(recovered);
+}
+
+function isAgentSidebarSessionEmpty(session: AgentSidebarSessionMeta) {
+  return !session.lastMessage.trim() && ["新对话", "默认会话"].includes(session.title);
+}
+
+function pickPreferredAgentSidebarSessionId(
+  sessions: AgentSidebarSessionMeta[],
+  savedActiveSessionId: string | null,
+) {
+  if (savedActiveSessionId && sessions.some((session) => session.id === savedActiveSessionId)) {
+    return savedActiveSessionId;
+  }
+  const latestNonEmptySession = sessions.find((session) => !isAgentSidebarSessionEmpty(session));
+  return latestNonEmptySession?.id ?? sessions[0]?.id ?? "";
+}
 
 function AgentSidebar({
   collapsed,
@@ -1688,55 +1837,73 @@ function AgentSidebar({
   const [loading, setLoading] = useState(false);
   const [showSessionStrip, setShowSessionStrip] = useState(false);
   const [showPromptStrip, setShowPromptStrip] = useState(false);
-  const [sessions, setSessions] = useState<AgentSidebarSessionMeta[]>(() => [createSessionMeta()]);
+  const [sessions, setSessions] = useState<AgentSidebarSessionMeta[]>([]);
   const [activeSessionId, setActiveSessionId] = useState("");
-  const [messages, setMessages] = useState<AgentSidebarMessage[]>(() => [createWelcomeMessage()]);
+  const [messagesBySessionId, setMessagesBySessionId] = useState<
+    Record<string, AgentSidebarMessage[]>
+  >({});
+  const [storageHydrated, setStorageHydrated] = useState(false);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+
+  const messages = useMemo(() => {
+    if (!activeSessionId) return [createWelcomeMessage()];
+    return messagesBySessionId[activeSessionId] ?? [createWelcomeMessage()];
+  }, [activeSessionId, messagesBySessionId]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
     try {
       const rawSessions = window.localStorage.getItem(sessionsStorageKey);
       const parsedSessions = rawSessions ? (JSON.parse(rawSessions) as AgentSidebarSessionMeta[]) : null;
+      const recoveredSessions = recoverAgentSidebarSessionsFromStorage(window.localStorage);
       const initialSessions =
         Array.isArray(parsedSessions) && parsedSessions.length > 0
-          ? parsedSessions.slice(0, 12)
+          ? normalizeAgentSidebarSessions([...parsedSessions, ...recoveredSessions])
+          : recoveredSessions.length > 0
+            ? recoveredSessions
           : [createSessionMeta("默认会话")];
       setSessions(initialSessions);
       const savedActive = window.localStorage.getItem(activeSessionStorageKey);
-      const resolvedActive =
-        savedActive && initialSessions.some((session) => session.id === savedActive)
-          ? savedActive
-          : initialSessions[0].id;
+      const resolvedActive = pickPreferredAgentSidebarSessionId(initialSessions, savedActive);
       setActiveSessionId(resolvedActive);
     } catch {
       const fallback = [createSessionMeta("默认会话")];
       setSessions(fallback);
       setActiveSessionId(fallback[0].id);
+    } finally {
+      setStorageHydrated(true);
     }
   }, []);
 
   useEffect(() => {
-    if (!activeSessionId || typeof window === "undefined") return;
-    try {
-      const raw = window.localStorage.getItem(buildMessageStorageKey(activeSessionId));
-      const parsed = raw ? (JSON.parse(raw) as AgentSidebarMessage[]) : null;
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        setMessages(parsed.slice(-40));
-        return;
+    if (!storageHydrated || !activeSessionId || typeof window === "undefined") return;
+    setMessagesBySessionId((prev) => {
+      if (prev[activeSessionId]) return prev;
+      try {
+        const raw = window.localStorage.getItem(buildMessageStorageKey(activeSessionId));
+        const parsed = raw ? (JSON.parse(raw) as AgentSidebarMessage[]) : null;
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return {
+            ...prev,
+            [activeSessionId]: parsed.slice(-AGENT_SIDEBAR_MAX_MESSAGES),
+          };
+        }
+      } catch {
+        // ignore
       }
-    } catch {
-      // ignore
-    }
-    setMessages([createWelcomeMessage()]);
-  }, [activeSessionId]);
+      return {
+        ...prev,
+        [activeSessionId]: [createWelcomeMessage()],
+      };
+    });
+  }, [activeSessionId, storageHydrated]);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
+    if (!storageHydrated || typeof window === "undefined") return;
     try {
       window.localStorage.setItem(
         sessionsStorageKey,
-        JSON.stringify(sessions.slice().sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 12)),
+        JSON.stringify(normalizeAgentSidebarSessions(sessions)),
       );
       if (activeSessionId) {
         window.localStorage.setItem(activeSessionStorageKey, activeSessionId);
@@ -1744,19 +1911,21 @@ function AgentSidebar({
     } catch {
       // ignore
     }
-  }, [sessions, activeSessionId]);
+  }, [activeSessionId, sessions, storageHydrated]);
 
   useEffect(() => {
-    if (!activeSessionId || typeof window === "undefined") return;
+    if (!storageHydrated || typeof window === "undefined") return;
     try {
-      window.localStorage.setItem(
-        buildMessageStorageKey(activeSessionId),
-        JSON.stringify(messages.slice(-40)),
-      );
+      for (const [sessionId, sessionMessages] of Object.entries(messagesBySessionId)) {
+        window.localStorage.setItem(
+          buildMessageStorageKey(sessionId),
+          JSON.stringify(sessionMessages.slice(-AGENT_SIDEBAR_MAX_MESSAGES)),
+        );
+      }
     } catch {
       // ignore
     }
-  }, [activeSessionId, messages]);
+  }, [messagesBySessionId, storageHydrated]);
 
   useEffect(() => {
     const node = scrollRef.current;
@@ -1811,8 +1980,11 @@ function AgentSidebar({
   const activeSession = sessions.find((session) => session.id === activeSessionId) ?? null;
 
   const clearConversation = () => {
-    setMessages([createWelcomeMessage("已清空当前会话。你可以继续基于当前工作台提问。")]);
     if (!activeSessionId) return;
+    setMessagesBySessionId((prev) => ({
+      ...prev,
+      [activeSessionId]: [createWelcomeMessage("已清空当前会话。你可以继续基于当前工作台提问。")],
+    }));
     setSessions((prev) =>
       prev.map((session) =>
         session.id === activeSessionId
@@ -1823,10 +1995,22 @@ function AgentSidebar({
   };
 
   const createNewSession = () => {
+    const reusableEmptySession = sessions.find((session) => isAgentSidebarSessionEmpty(session));
+    if (reusableEmptySession) {
+      setActiveSessionId(reusableEmptySession.id);
+      setMessagesBySessionId((prev) => ({
+        ...prev,
+        [reusableEmptySession.id]: [createWelcomeMessage("已回到现有空白会话。")],
+      }));
+      return;
+    }
     const next = createSessionMeta("新对话");
-    setSessions((prev) => [next, ...prev].slice(0, 12));
+    setSessions((prev) => normalizeAgentSidebarSessions([next, ...prev]));
     setActiveSessionId(next.id);
-    setMessages([createWelcomeMessage("已创建一个新的对话会话。")]);
+    setMessagesBySessionId((prev) => ({
+      ...prev,
+      [next.id]: [createWelcomeMessage("已创建一个新的对话会话。")],
+    }));
   };
 
   const deleteSession = (sessionId: string) => {
@@ -1842,10 +2026,17 @@ function AgentSidebar({
       const fallback = createSessionMeta("新对话");
       setSessions([fallback]);
       setActiveSessionId(fallback.id);
-      setMessages([createWelcomeMessage()]);
+      setMessagesBySessionId({
+        [fallback.id]: [createWelcomeMessage()],
+      });
       return;
     }
     setSessions(remaining);
+    setMessagesBySessionId((prev) => {
+      const next = { ...prev };
+      delete next[sessionId];
+      return next;
+    });
     if (activeSessionId === sessionId) {
       setActiveSessionId(remaining[0].id);
     }
@@ -1862,7 +2053,9 @@ function AgentSidebar({
 
   const sendMessage = async (raw?: string) => {
     const text = (raw ?? draft).trim();
-    if (!text || loading) return;
+    if (!text || loading || !activeSessionId) return;
+
+    const targetSessionId = activeSessionId;
 
     const userMessage: AgentSidebarMessage = {
       id: `${Date.now()}-user`,
@@ -1875,11 +2068,17 @@ function AgentSidebar({
       detail: text.slice(0, 80),
     });
 
-    setMessages((prev) => [...prev, userMessage]);
+    setMessagesBySessionId((prev) => {
+      const current = prev[targetSessionId] ?? [createWelcomeMessage()];
+      return {
+        ...prev,
+        [targetSessionId]: [...current, userMessage].slice(-AGENT_SIDEBAR_MAX_MESSAGES),
+      };
+    });
     setSessions((prev) =>
       prev
         .map((session) =>
-          session.id === activeSessionId
+          session.id === targetSessionId
             ? {
                 ...session,
                 title: session.title === "新对话" ? text.slice(0, 18) : session.title,
@@ -1896,21 +2095,25 @@ function AgentSidebar({
     try {
       const reply = await requestOpenClawAgent({
         message: text,
-        sessionId: `webos-desktop-agent-sidebar-${activeSessionId || "main"}`,
+        sessionId: `webos-desktop-agent-sidebar-${targetSessionId}`,
         timeoutSeconds: 45,
       });
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: `${Date.now()}-assistant`,
-          role: "assistant",
-          text: reply || "（没有返回内容）",
-        },
-      ]);
+      const assistantMessage: AgentSidebarMessage = {
+        id: `${Date.now()}-assistant`,
+        role: "assistant",
+        text: reply || "（没有返回内容）",
+      };
+      setMessagesBySessionId((prev) => {
+        const current = prev[targetSessionId] ?? [createWelcomeMessage()];
+        return {
+          ...prev,
+          [targetSessionId]: [...current, assistantMessage].slice(-AGENT_SIDEBAR_MAX_MESSAGES),
+        };
+      });
       setSessions((prev) =>
         prev
           .map((session) =>
-            session.id === activeSessionId
+            session.id === targetSessionId
               ? {
                   ...session,
                   updatedAt: Date.now(),
@@ -1923,19 +2126,23 @@ function AgentSidebar({
       updateTask(runningTaskId, { status: "done", detail: "对话完成" });
     } catch (error) {
       const message = error instanceof Error ? error.message : "请求失败";
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: `${Date.now()}-error`,
-          role: "assistant",
-          text: message,
-          error: true,
-        },
-      ]);
+      const errorMessage: AgentSidebarMessage = {
+        id: `${Date.now()}-error`,
+        role: "assistant",
+        text: message,
+        error: true,
+      };
+      setMessagesBySessionId((prev) => {
+        const current = prev[targetSessionId] ?? [createWelcomeMessage()];
+        return {
+          ...prev,
+          [targetSessionId]: [...current, errorMessage].slice(-AGENT_SIDEBAR_MAX_MESSAGES),
+        };
+      });
       setSessions((prev) =>
         prev
           .map((session) =>
-            session.id === activeSessionId
+            session.id === targetSessionId
               ? {
                   ...session,
                   updatedAt: Date.now(),
@@ -2056,6 +2263,24 @@ function AgentSidebar({
               </button>
               <button
                 type="button"
+                onClick={() => {
+                  const latestNonEmptySession = sessions.find(
+                    (session) =>
+                      session.id !== activeSessionId && !isAgentSidebarSessionEmpty(session),
+                  );
+                  if (latestNonEmptySession) {
+                    setActiveSessionId(latestNonEmptySession.id);
+                  }
+                }}
+                className="text-[11px] font-semibold text-white/62 transition-colors hover:text-white"
+                disabled={!sessions.some(
+                  (session) => session.id !== activeSessionId && !isAgentSidebarSessionEmpty(session),
+                )}
+              >
+                回到最近
+              </button>
+              <button
+                type="button"
                 onClick={clearConversation}
                 className="text-[11px] font-semibold text-white/62 transition-colors hover:text-white"
               >
@@ -2063,8 +2288,8 @@ function AgentSidebar({
               </button>
             </div>
             {showSessionStrip ? (
-              <div className="mt-2.5 space-y-2">
-                {sessions.slice(0, 3).map((session) => {
+              <div className="mt-2.5 max-h-72 space-y-2 overflow-y-auto pr-1">
+                {sessions.map((session) => {
                   const active = session.id === activeSessionId;
                   return (
                     <div
@@ -2086,7 +2311,10 @@ function AgentSidebar({
                           {session.lastMessage || "暂无消息"}
                         </div>
                       </button>
-                      <div className="mt-2 flex justify-end">
+                      <div className="mt-2 flex items-center justify-between gap-2">
+                        <div className="text-[10px] text-white/35">
+                          {active ? "当前会话" : new Date(session.updatedAt).toLocaleString()}
+                        </div>
                         <button
                           type="button"
                           onClick={() => deleteSession(session.id)}

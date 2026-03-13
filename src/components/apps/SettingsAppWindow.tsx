@@ -27,9 +27,11 @@ import {
   subscribePublishConfig,
 } from "@/lib/publish-config";
 import {
+  type AppCategory,
   appCatalog,
   getAppDisplayName,
-  getCategoryLabel,
+  getCategoryMeta,
+  listCategoryMetas,
 } from "@/lib/app-display";
 import { buildAgentCoreApiUrl } from "@/lib/app-api";
 import {
@@ -303,14 +305,14 @@ export function SettingsAppWindow({
   } = useImBridge(isWindowVisible && activeTab === "remote");
 
   const appGroups = useMemo(() => {
-    const grouped = new Map<string, typeof appCatalog>();
-    for (const item of appCatalog) {
-      const group = grouped.get(item.category) ?? [];
-      group.push(item);
-      grouped.set(item.category, group);
-    }
-    return Array.from(grouped.entries());
-  }, []);
+    return listCategoryMetas(form.personalization.interfaceLanguage)
+      .map((meta) => ({
+        category: meta.id,
+        meta,
+        items: appCatalog.filter((item) => item.category === meta.id),
+      }))
+      .filter((group) => group.items.length > 0);
+  }, [form.personalization.interfaceLanguage]);
   const imProviders = useMemo(
     () =>
       [
@@ -474,6 +476,40 @@ export function SettingsAppWindow({
         },
       };
     });
+  };
+
+  const applyCategorySelection = (
+    category: AppCategory,
+    target: "desktop" | "dock",
+    enabled: boolean,
+  ) => {
+    const categoryApps = appCatalog
+      .filter((item) => item.category === category)
+      .map((item) => item.id);
+    setForm((prev) => {
+      const current =
+        target === "desktop"
+          ? prev.personalization.customDesktopApps
+          : prev.personalization.customDockApps;
+      const next = enabled
+        ? Array.from(new Set([...current, ...categoryApps]))
+        : current.filter((appId) => !categoryApps.includes(appId));
+      return {
+        ...prev,
+        personalization: {
+          ...prev.personalization,
+          useCustomWorkspace: true,
+          customDesktopApps:
+            target === "desktop" ? next : prev.personalization.customDesktopApps,
+          customDockApps: target === "dock" ? next : prev.personalization.customDockApps,
+        },
+      };
+    });
+  };
+
+  const clearCategorySelection = (category: AppCategory) => {
+    applyCategorySelection(category, "desktop", false);
+    applyCategorySelection(category, "dock", false);
   };
 
   const handleTestActiveProvider = async () => {
@@ -2371,6 +2407,18 @@ export function SettingsAppWindow({
                             personalization: {
                               ...prev.personalization,
                               useCustomWorkspace: e.target.checked,
+                              customDesktopApps: e.target.checked
+                                ? prev.personalization.customDesktopApps.length > 0
+                                  ? prev.personalization.customDesktopApps
+                                  : Array.from(
+                                      new Set(selectedScenario?.desktopApps ?? []),
+                                    )
+                                : prev.personalization.customDesktopApps,
+                              customDockApps: e.target.checked
+                                ? prev.personalization.customDockApps.length > 0
+                                  ? prev.personalization.customDockApps
+                                  : Array.from(new Set(selectedScenario?.dockApps ?? []))
+                                : prev.personalization.customDockApps,
                             },
                           }))
                         }
@@ -2496,53 +2544,137 @@ export function SettingsAppWindow({
                       </div>
                     </div>
 
-                    {appGroups.map(([category, items]) => (
-                      <div key={category} className="rounded-2xl border border-gray-200 bg-white overflow-hidden">
-                        <div className="border-b border-gray-200 bg-gray-50 px-4 py-3 text-sm font-semibold text-gray-900">
-                          {getCategoryLabel(category as any)}
-                        </div>
-                        <div className="divide-y divide-gray-100">
-                          {items.map((item) => {
-                            const desktopEnabled = form.personalization.customDesktopApps.includes(item.id);
-                            const dockEnabled = form.personalization.customDockApps.includes(item.id);
-                            return (
-                              <div
-                                key={item.id}
-                                className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
-                              >
-                                <div className="text-sm font-medium text-gray-900">
-                                  {getAppDisplayName(
-                                    item.id,
-                                    item.id,
-                                    form.personalization.interfaceLanguage,
-                                  )}
+                    {appGroups.map((group) => {
+                      const desktopCount = group.items.filter((item) =>
+                        form.personalization.customDesktopApps.includes(item.id),
+                      ).length;
+                      const dockCount = group.items.filter((item) =>
+                        form.personalization.customDockApps.includes(item.id),
+                      ).length;
+
+                      return (
+                        <div
+                          key={group.category}
+                          className="rounded-3xl border border-gray-200 bg-white p-4 shadow-sm"
+                        >
+                          <div className="flex flex-col gap-3 border-b border-gray-100 pb-4 lg:flex-row lg:items-start lg:justify-between">
+                            <div>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <div className="text-sm font-semibold text-gray-900">
+                                  {group.meta.label}
                                 </div>
-                                <div className="flex flex-wrap items-center gap-4 text-xs font-semibold text-gray-700">
-                                  <label className="inline-flex items-center gap-2">
-                                    <input
-                                      type="checkbox"
-                                      checked={desktopEnabled}
-                                      onChange={() => toggleDesktopApp(item.id)}
-                                      className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                                    />
-                                    Desktop
-                                  </label>
-                                  <label className="inline-flex items-center gap-2">
-                                    <input
-                                      type="checkbox"
-                                      checked={dockEnabled}
-                                      onChange={() => toggleDockApp(item.id)}
-                                      className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                                    />
-                                    Dock
-                                  </label>
-                                </div>
+                                <span className="rounded-full bg-gray-100 px-2.5 py-1 text-[11px] font-semibold text-gray-700">
+                                  {group.items.length} 个应用
+                                </span>
+                                <span className="rounded-full bg-blue-50 px-2.5 py-1 text-[11px] font-semibold text-blue-700">
+                                  Desktop {desktopCount}
+                                </span>
+                                <span className="rounded-full bg-violet-50 px-2.5 py-1 text-[11px] font-semibold text-violet-700">
+                                  Dock {dockCount}
+                                </span>
                               </div>
-                            );
-                          })}
+                              <div className="mt-2 text-xs leading-5 text-gray-500">
+                                {group.meta.description}
+                              </div>
+                              <div className="mt-1 text-[11px] leading-5 text-gray-400">
+                                {group.meta.helper}
+                              </div>
+                            </div>
+
+                            <div className="flex flex-wrap gap-2">
+                              <button
+                                type="button"
+                                onClick={() => applyCategorySelection(group.category, "desktop", true)}
+                                className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 transition-colors hover:bg-gray-50"
+                              >
+                                全选 Desktop
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => applyCategorySelection(group.category, "dock", true)}
+                                className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 transition-colors hover:bg-gray-50"
+                              >
+                                全选 Dock
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => clearCategorySelection(group.category)}
+                                className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700 transition-colors hover:bg-rose-100"
+                              >
+                                清空本类
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className="mt-4 grid grid-cols-1 gap-3 xl:grid-cols-2">
+                            {group.items.map((item) => {
+                              const desktopEnabled = form.personalization.customDesktopApps.includes(item.id);
+                              const dockEnabled = form.personalization.customDockApps.includes(item.id);
+                              const statusText = desktopEnabled && dockEnabled
+                                ? "已同时加入 Desktop 和 Dock"
+                                : desktopEnabled
+                                  ? "当前显示在 Desktop"
+                                  : dockEnabled
+                                    ? "当前固定到 Dock"
+                                    : "尚未加入当前工作台";
+                              return (
+                                <div
+                                  key={item.id}
+                                  className={[
+                                    "rounded-2xl border p-4 transition-colors",
+                                    desktopEnabled || dockEnabled
+                                      ? "border-blue-100 bg-blue-50/40"
+                                      : "border-gray-200 bg-gray-50/70",
+                                  ].join(" ")}
+                                >
+                                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                                    <div className="min-w-0">
+                                      <div className="text-sm font-semibold text-gray-900">
+                                        {getAppDisplayName(
+                                          item.id,
+                                          item.id,
+                                          form.personalization.interfaceLanguage,
+                                        )}
+                                      </div>
+                                      <div className="mt-1 text-xs text-gray-500">
+                                        {statusText}
+                                      </div>
+                                    </div>
+
+                                    <div className="flex flex-wrap gap-2">
+                                      <button
+                                        type="button"
+                                        onClick={() => toggleDesktopApp(item.id)}
+                                        className={[
+                                          "rounded-xl px-3 py-2 text-xs font-semibold transition-colors",
+                                          desktopEnabled
+                                            ? "bg-blue-600 text-white hover:bg-blue-700"
+                                            : "border border-gray-200 bg-white text-gray-700 hover:bg-gray-100",
+                                        ].join(" ")}
+                                      >
+                                        {desktopEnabled ? "移出 Desktop" : "加入 Desktop"}
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => toggleDockApp(item.id)}
+                                        className={[
+                                          "rounded-xl px-3 py-2 text-xs font-semibold transition-colors",
+                                          dockEnabled
+                                            ? "bg-violet-600 text-white hover:bg-violet-700"
+                                            : "border border-gray-200 bg-white text-gray-700 hover:bg-gray-100",
+                                        ].join(" ")}
+                                      >
+                                        {dockEnabled ? "移出 Dock" : "加入 Dock"}
+                                      </button>
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               </section>
