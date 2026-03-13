@@ -3,7 +3,7 @@
 [![CI](https://github.com/aidi1723/agentcore-os/actions/workflows/ci.yml/badge.svg)](https://github.com/aidi1723/agentcore-os/actions/workflows/ci.yml)
 [![License: Apache_2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
-# 🚀 AgentCore OS (智枢 OS) V1.0 正式开源：赋予每个人和团队的本地化 AI 生产力底座
+## 🚀 AgentCore OS (智枢 OS) V1.0 正式开源：赋予每个人和团队的本地化 AI 生产力底座
 
 过去两年，我们都在和网页里的对话框“聊天”。
 
