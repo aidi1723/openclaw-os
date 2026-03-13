@@ -3,13 +3,13 @@
 [![CI](https://github.com/aidi1723/agentcore-os/actions/workflows/ci.yml/badge.svg)](https://github.com/aidi1723/agentcore-os/actions/workflows/ci.yml)
 [![License: Apache_2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
-AgentCore OS is a **local-first, out-of-the-box AI business operating system**.
-It is not just another chat wrapper. It is a real desktop foundation built for execution: models, workflows, files, tool calls, and human approval boundaries working together on your own machine.
+AgentCore OS is a **local-first AI productivity foundation built for real work**.
+It is designed to help more people — from business owners and makers to complete computer beginners and workflow operators — use AI with a lower barrier, stronger privacy, and clearer control on their own machines.
 
 Our goal is simple:
 
-**Bring AI out of the chat box and into real personal and business workflows.**
-Give individuals enterprise-grade digital productivity, and give teams a safer, more controllable, lower-friction way to deploy local AI systems.
+**Give more people a secure, privacy-first, low-friction local AI system that can do real work and steadily accumulate operational assets.**
+That means moving AI beyond the chat box and into actual personal and business workflows, where models, files, tools, approvals, and reusable workflow assets can work together.
 
 ## Built for multi-scenario AI adoption, not a single-point tool
 
