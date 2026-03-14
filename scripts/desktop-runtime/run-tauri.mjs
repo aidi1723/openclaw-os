@@ -284,8 +284,8 @@ async function runTauriDev(cargo) {
 }
 
 async function runTauriCli(args) {
-  const npmCommand = process.platform === "win32" ? "npx.cmd" : "npx";
-  await runChild(npmCommand, ["-y", "@tauri-apps/cli@^2", ...args]);
+  const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
+  await runChild(npmCommand, ["exec", "--", "tauri", ...args]);
 }
 
 async function runTauriBuild(cargo, useCargoTauri) {
