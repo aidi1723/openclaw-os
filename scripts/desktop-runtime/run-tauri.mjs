@@ -306,7 +306,7 @@ async function runTauriCli(args) {
   if (process.platform === "win32") {
     const cmd = process.env.ComSpec || "C:\\Windows\\System32\\cmd.exe";
     const command = `"${localTauri}" ${args.map((arg) => `"${String(arg).replaceAll('"', '\\"')}"`).join(" ")}`;
-    await runChild(cmd, ["/d", "/s", "/c", command]);
+    await runChild(cmd, ["/d", "/c", command]);
     return;
   }
 
