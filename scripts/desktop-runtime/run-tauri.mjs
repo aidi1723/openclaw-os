@@ -292,8 +292,14 @@ async function runTauriDev(cargo) {
 }
 
 async function runTauriCli(args) {
-  const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
-  await runChild(npmCommand, ["exec", "--", "tauri", ...args]);
+  if (process.platform === "win32") {
+    const cmd = process.env.ComSpec || "C:\\Windows\\System32\\cmd.exe";
+    const command = `npm exec -- tauri ${args.map((arg) => `"${String(arg).replaceAll('"', '\\"')}"`).join(" ")}`;
+    await runChild(cmd, ["/d", "/s", "/c", command]);
+    return;
+  }
+
+  await runChild("npm", ["exec", "--", "tauri", ...args]);
 }
 
 async function runTauriBuild(cargo, useCargoTauri) {
