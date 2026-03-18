@@ -17,20 +17,19 @@ The main goals are:
 
 For the current public release line, the intended external reading order is:
 
-1. `v0.2.0-beta.1` as the primary public reference point
-2. later beta tags only when explicitly described as transitional, technical-preview, or implementation-record releases
+1. `v0.2.0-beta.2` as the current public distribution baseline
+2. earlier tags as historical context, packaging traceability, and release evolution record
 
-This means not every later tag in the beta series should be interpreted as an equally emphasized public product milestone.
-Some releases may remain public for chronology, technical traceability, packaging verification, or implementation reference, while still being de-emphasized as the main public entry point.
+This means the public repository should now treat `v0.2.0-beta.2` as the recommended external starting point for evaluation, installation, and release-note reference. Earlier beta tags remain useful for history, but should no longer be presented as the primary public recommendation.
 
 In practical terms:
 
-- `v0.2.0-beta.1` is the clearest public snapshot for understanding the AgentCore OS rename and direction shift
-- later prereleases may document follow-up engineering progress without carrying the same public-positioning weight
-- public visibility does not automatically imply equal product recommendation status
-- commercial, operator-specific, or tighter-distribution follow-up work may proceed separately from the public beta line
+- `v0.2.0-beta.2` is the current public snapshot to recommend to new external users
+- `v0.2.0-beta.1` remains an earlier milestone in the naming transition, but not the default public entry point
+- public docs, installation guidance, and GitHub release copy should align around `v0.2.0-beta.2`
+- domestic mirror / CNB distribution may still proceed as a separate follow-up step
 
-When writing release notes, repository docs, or external summaries, prefer wording that makes this distinction explicit.
+When writing release notes, repository docs, or external summaries, prefer wording that makes this positioning explicit.
 
 ## Scope of This Public Refactor
 

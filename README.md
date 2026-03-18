@@ -116,11 +116,11 @@ After startup, you can access:
 
 ## Desktop downloads
 
-Primary public reference release: **v0.2.0-beta.1**
+Current recommended public release: **v0.2.0-beta.2**
 
-Later prereleases may remain visible for chronology, packaging verification, or technical-preview purposes, but they are not necessarily equal public recommendation points. See [Public Release Guide](docs/PUBLIC_RELEASE.md).
+`v0.2.0-beta.2` is the current public distribution baseline for AgentCore OS. It is the recommended starting point for external evaluation, desktop installation, and release-note reference. See [Public Release Guide](docs/PUBLIC_RELEASE.md).
 
-Current visible desktop build snapshot: **0.2.0-beta.2**
+Current desktop build snapshot: **0.2.0-beta.2**
 
 - macOS (Apple Silicon / aarch64 DMG): <http://59.110.93.188/downloads/AgentCore.OS_0.2.0-beta.2_aarch64.dmg>
 - Windows (x64 EXE installer): <http://59.110.93.188/downloads/AgentCore.OS_0.2.0-beta.2_x64_setup.exe>
@@ -161,6 +161,7 @@ Template notes are in [`deploy/README.md`](deploy/README.md).
 
 ### Start here
 - [Getting Started](docs/GETTING_STARTED.md)
+- [Documentation Index (ZH)](docs/DOCUMENTATION_INDEX.zh-CN.md)
 - [User Guide (ZH)](docs/USER_GUIDE.zh-CN.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Solution OS Direction](docs/SOLUTION_OS.md)
@@ -172,6 +173,10 @@ Template notes are in [`deploy/README.md`](deploy/README.md).
 
 ### Operational docs
 - [Public Release Guide](docs/PUBLIC_RELEASE.md)
+- [Early Access Release (ZH)](docs/EARLY_ACCESS_RELEASE.zh-CN.md)
+- [Command Line Install (ZH)](docs/COMMAND_LINE_INSTALL.zh-CN.md)
+- [macOS Unsigned Install (ZH)](docs/MACOS_UNSIGNED_INSTALL.zh-CN.md)
+- [macOS Signing & Notarization (ZH)](docs/MACOS_SIGNING_AND_NOTARIZATION.zh-CN.md)
 - [Configuration](docs/CONFIGURATION.md)
 - [Deployment](docs/DEPLOYMENT.md)
 - [Next Steps](docs/NEXT_STEPS.md)
