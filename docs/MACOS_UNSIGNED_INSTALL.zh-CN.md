@@ -26,5 +26,5 @@
 
 推荐搭配阅读：
 
-- [当前版本发布说明](releases/v0.2.0-beta.2.md)
+- [当前版本发布说明](releases/v1.0.0.md)
 - [macOS 签名与公证说明](MACOS_SIGNING_AND_NOTARIZATION.zh-CN.md)

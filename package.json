@@ -1,8 +1,11 @@
 {
   "name": "agentcore-os",
-  "version": "0.2.0-beta.2",
+  "version": "1.0.0",
   "private": true,
   "license": "Apache-2.0",
+  "engines": {
+    "node": ">=20 <24"
+  },
   "scripts": {
     "dev": "next dev",
     "dev:clean": "node -e \"require('fs').rmSync('.next-dev',{recursive:true,force:true});\" && next dev -p 3000",

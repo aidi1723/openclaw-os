@@ -23,4 +23,4 @@
 ## 配套文档
 
 - [macOS 未签名安装说明](MACOS_UNSIGNED_INSTALL.zh-CN.md)
-- [当前版本发布说明](releases/v0.2.0-beta.2.md)
+- [当前版本发布说明](releases/v1.0.0.md)

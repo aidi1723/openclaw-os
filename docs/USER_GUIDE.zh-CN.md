@@ -50,10 +50,10 @@ npm run dev
 - macOS：直接打开 `.app` 或安装 `.dmg`
 - Windows：安装 `NSIS .exe`
 
-当前公开下载版本：`0.2.0-beta.2`
+当前公开稳定版本：`1.0.0`
 
-- macOS（Apple Silicon / aarch64）：<http://59.110.93.188/downloads/AgentCore.OS_0.2.0-beta.2_aarch64.dmg>
-- Windows（x64）：<http://59.110.93.188/downloads/AgentCore.OS_0.2.0-beta.2_x64_setup.exe>
+- GitHub Releases：<https://github.com/aidi1723/agentcore-os/releases>
+- 当前版本发布说明：[docs/releases/v1.0.0.md](releases/v1.0.0.md)
 
 如果你要自己本地验证桌面构建链：
 

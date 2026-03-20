@@ -28,22 +28,24 @@ AgentCore OS 当前更适合这样理解：
 - 编程与自动化
 - 工厂、仓储与数据流程协同
 
-## 当前公开体验版本
+## 当前稳定版本
 
-当前推荐对外体验版本：**v0.2.0-beta.2**
+当前推荐对外版本：**v1.0.0**
 
-当前桌面构建版本：**0.2.0-beta.2**
+当前稳定产品线聚焦：
 
-下载地址：
+- 本地优先
+- BYOK / API Key 驱动
+- 浏览器壳 + 桌面壳双入口
+- 内容创作、销售跟进、研究分析三条核心链路
 
-- macOS（Apple Silicon / aarch64 DMG）：<http://59.110.93.188/downloads/AgentCore.OS_0.2.0-beta.2_aarch64.dmg>
-- Windows（x64 EXE 安装包）：<http://59.110.93.188/downloads/AgentCore.OS_0.2.0-beta.2_x64_setup.exe>
+获取安装包与公开发布信息，请以 GitHub Releases 页面为准：
 
-如果你希望先了解当前版本定位、适用人群与分发方式，请先看：
-
-- [当前版本发布说明](docs/releases/v0.2.0-beta.2.md)
-- [对外分发说明](docs/EARLY_ACCESS_RELEASE.zh-CN.md)
-- [文档总入口](docs/DOCUMENTATION_INDEX.zh-CN.md)
+- GitHub Releases：<https://github.com/aidi1723/agentcore-os/releases>
+- 当前版本发布说明：[docs/releases/v1.0.0.md](docs/releases/v1.0.0.md)
+- 对外分发说明：[docs/EARLY_ACCESS_RELEASE.zh-CN.md](docs/EARLY_ACCESS_RELEASE.zh-CN.md)
+- 市场发布文案：[docs/LAUNCH_COPY_v1.0.0.zh-CN.md](docs/LAUNCH_COPY_v1.0.0.zh-CN.md)
+- 文档总入口：[docs/DOCUMENTATION_INDEX.zh-CN.md](docs/DOCUMENTATION_INDEX.zh-CN.md)
 
 ## 快速开始
 
@@ -53,6 +55,8 @@ AgentCore OS 当前更适合这样理解：
 npm install
 npm run dev
 ```
+
+建议本地开发使用 Node.js 22 LTS。
 
 启动后访问：
 
@@ -89,8 +93,9 @@ npm run dev
 
 - [文档总入口](docs/DOCUMENTATION_INDEX.zh-CN.md)
 - [用户指南（中文）](docs/USER_GUIDE.zh-CN.md)
-- [当前版本发布说明](docs/releases/v0.2.0-beta.2.md)
+- [当前版本发布说明](docs/releases/v1.0.0.md)
 - [对外分发说明](docs/EARLY_ACCESS_RELEASE.zh-CN.md)
+- [市场发布文案](docs/LAUNCH_COPY_v1.0.0.zh-CN.md)
 
 ### 安装与发布相关
 

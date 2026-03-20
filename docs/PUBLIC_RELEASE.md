@@ -17,16 +17,16 @@ The main goals are:
 
 For the current public release line, the intended external reading order is:
 
-1. `v0.2.0-beta.2` as the current public distribution baseline
+1. `v1.0.0` as the current stable public distribution baseline
 2. earlier tags as historical context, packaging traceability, and release evolution record
 
-This means the public repository should now treat `v0.2.0-beta.2` as the recommended external starting point for evaluation, installation, and release-note reference. Earlier beta tags remain useful for history, but should no longer be presented as the primary public recommendation.
+This means the public repository should now treat `v1.0.0` as the recommended external starting point for evaluation, installation, and release-note reference. Earlier beta tags remain useful for history, but should no longer be presented as the primary public recommendation.
 
 In practical terms:
 
-- `v0.2.0-beta.2` is the current public snapshot to recommend to new external users
-- `v0.2.0-beta.1` remains an earlier milestone in the naming transition, but not the default public entry point
-- public docs, installation guidance, and GitHub release copy should align around `v0.2.0-beta.2`
+- `v1.0.0` is the current public stable snapshot to recommend to new external users
+- `v0.2.0-beta.2` remains the last beta milestone before the stable line, but not the default public entry point
+- public docs, installation guidance, and GitHub release copy should align around `v1.0.0`
 - domestic mirror / CNB distribution may still proceed as a separate follow-up step
 
 When writing release notes, repository docs, or external summaries, prefer wording that makes this positioning explicit.
@@ -240,5 +240,5 @@ These can be valid, but they should be reviewed before commit in a public-releas
 ## Notes
 
 - If `docs/releases/2026-03-14.md` is intended as a working migration record, that is acceptable.
-- If the document is intended to function as an externally referenced release note, a versioned release-note filename such as `docs/releases/v0.2.0-beta.2.md` may be easier to index from `README.md` and GitHub Releases.
+- If the document is intended to function as an externally referenced release note, a versioned release-note filename such as `docs/releases/v1.0.0.md` may be easier to index from `README.md` and GitHub Releases.
 - The public repository should prefer clarity over perfect internal history fidelity. The goal is a clean, supportable public surface with explicit compatibility boundaries.
