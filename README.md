@@ -1,238 +1,136 @@
-# AgentCore OS V1.0 Open Source Release
+# AgentCore OS（智枢 OS）
 
 [![CI](https://github.com/aidi1723/agentcore-os/actions/workflows/ci.yml/badge.svg)](https://github.com/aidi1723/agentcore-os/actions/workflows/ci.yml)
 [![License: Apache_2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
-AgentCore OS is a **local-first AI productivity foundation built for real work**.
-It is designed to help more people — from business owners and makers to complete computer beginners and workflow operators — use AI with a lower barrier, stronger privacy, and clearer control on their own machines.
+AgentCore OS 是一个**本地优先、面向真实工作的 AI 工作底座**。
+它不是只会聊天的单点工具，而是把模型、文件、工具、审批、连接器和工作流资产，放进一个可持续积累的本地工作系统里。
 
-Our goal is simple:
+我们的目标很直接：
 
-**Give more people a secure, privacy-first, low-friction local AI system that can do real work and steadily accumulate operational assets.**
-That means moving AI beyond the chat box and into actual personal and business workflows, where models, files, tools, approvals, and reusable workflow assets can work together.
+**让更多个人、团队和企业，以更低门槛、更高安全性、更强可控性，真正把 AI 用到日常业务里。**
 
-## Built for multi-scenario AI adoption, not a single-point tool
+## 当前定位
 
-AgentCore OS is not designed for only one role or one industry.
-It is a local AI work platform that can support **multiple roles, workflows, and business scenarios**.
+AgentCore OS 当前更适合这样理解：
 
-Current and actively developing directions include:
+- 一个本地优先的 AI 工作平台
+- 一个可承载多行业、多角色、多流程的业务工作台
+- 一个可以逐步沉淀企业数字员工 / Agent 工作流资产的基础设施
 
-- **Office collaboration**: document organization, task routing, meeting assistance, knowledge capture
-- **Design and content production**: asset organization, content generation, rewriting, multi-platform distribution
-- **Customer service and support**: issue classification, reply assistance, knowledge retrieval, service workflow coordination
-- **Finance and business support**: document sorting, form processing, workflow assistance, operational information handling
-- **Operations and growth**: topic extraction, content processing, channel distribution, data and workflow linkage
-- **Sales and foreign trade**: inquiry organization, customer background research, follow-up content generation, customer asset accumulation
-- **Programming and automation**: turning natural-language requirements into code, scripts, and local execution chains
-- **Factory production management**: production information organization, workflow coordination, task tracking, manufacturing collaboration
-- **Warehouse management**: inventory processing, in/outbound assistance, record and handoff collaboration
-- **Data analysis**: data preparation, structuring, analysis assistance, and result capture
+它适合的方向包括：
 
-In other words, this is not an AI tool that can do only one thing.
-It is an operating foundation that can gradually connect different roles and workflows into one local working system.
+- 外贸与销售跟进
+- 内容生产与分发
+- 客服与知识支持
+- 财务与业务辅助
+- 运营与增长
+- 编程与自动化
+- 工厂、仓储与数据流程协同
 
-## What real-world adoption already looks like
+## 当前公开体验版本
 
-We do not want to talk only about vision. We want to highlight the directions that are already running.
+当前推荐对外体验版本：**v0.2.0-beta.2**
 
-### Sales / Foreign Trade
-- Intake and organization of inquiries
-- Initial customer background research
-- Generate follow-up content based on local product materials and historical assets
-- Write results back into local customer assets and workflow records
+当前桌面构建版本：**0.2.0-beta.2**
 
-### Programming / Automation
-- Describe requirements in natural language
-- Drive code generation, debugging, fixing, and script delivery
-- Help makers, individual users, and small teams turn ideas into working tools more easily
+下载地址：
 
-### Content / Operations
-- From source material organization to content generation
-- From content processing to distribution and recordkeeping
-- Turn one-off output into reusable workflows over time
+- macOS（Apple Silicon / aarch64 DMG）：<http://59.110.93.188/downloads/AgentCore.OS_0.2.0-beta.2_aarch64.dmg>
+- Windows（x64 EXE 安装包）：<http://59.110.93.188/downloads/AgentCore.OS_0.2.0-beta.2_x64_setup.exe>
 
-### Factory / Warehouse / Data Flows
-- Around production, warehousing, and data-processing steps, gradually connect information organization, process collaboration, record capture, and analysis assistance into AI workflows
+如果你希望先了解当前版本定位、适用人群与分发方式，请先看：
 
-The key is not that AI answered a question.
-The key is that **AI starts participating in real workflows and continuously produces usable outputs.**
+- [当前版本发布说明](docs/releases/v0.2.0-beta.2.md)
+- [对外分发说明](docs/EARLY_ACCESS_RELEASE.zh-CN.md)
+- [文档总入口](docs/DOCUMENTATION_INDEX.zh-CN.md)
 
-## Core characteristics
+## 快速开始
 
-- **Local-first, safer by design**  
-  Workspaces, file assets, and execution chains are organized around the local environment. Sensitive actions can be placed behind explicit human approval boundaries.
-
-- **Supports macOS and Windows**  
-  Designed for real desktop use, not just web chat. It is meant to enter actual workflows on the local machine.
-
-- **Out of the box, beginner-friendly**  
-  Users should not be blocked by Docker, Python environments, or complicated command lines before they can start. Advanced users can go deep; ordinary users can get running quickly.
-
-- **Works with major domestic and international models**  
-  Through BYOK (Bring Your Own Key), you can connect models such as GPT, Claude, Kimi, DeepSeek, GLM, and Qwen as needed, and place model capability into real workflows.
-
-- **Broad enough and deep enough**  
-  It can support office work, design, customer service, finance, operations, sales, programming, manufacturing, warehousing, and analytics, while still being extensible into specific industries and deeper workflows.
-
-## Project status
-
-The current `main` branch can be treated as an evolving release-candidate line. At this stage, it already includes these foundational capabilities:
-
-- Desktop shell and multi-window interaction are available
-- Industry workspaces and scenario entry points are available
-- Multiple packaged business apps are integrated
-- One cross-application Hero Workflow is already running end to end
-- Multilingual entry points and first-run onboarding are integrated
-- Production hardening is still in progress
-
-## Current product structure
-
-The current AgentCore OS product structure can be summarized as:
-
-- `industry`: determines the business context the user is operating in
-- `role`: determines the default desk and responsibility entry point
-- `workflow`: determines standard action order, human review boundaries, and result asset paths
-- `apps`: execution components inside a workflow, not the only protagonist
-
-Representative example:
-
-- `Sales Desk`  
-  `Customer inquiry / manual input -> Deal Desk -> Email Assistant -> Personal CRM -> local sales asset accumulation`
-
-## Quick start
+### 本地开发体验
 
 ```bash
 npm install
 npm run dev
 ```
 
-Optional environment template:
-- [`.env.example`](.env.example)
+启动后访问：
 
-After startup, you can access:
-- App UI: `http://localhost:3000/`
-- Optional local connector UI: `http://127.0.0.1:8787/`
+- App UI：`http://localhost:3000/`
+- 可选本地 Connector UI：`http://127.0.0.1:8787/`
 
-## Desktop downloads
+### 桌面版体验
 
-Current recommended public release: **v0.2.0-beta.2**
+如果你已下载桌面安装包：
 
-`v0.2.0-beta.2` is the current public distribution baseline for AgentCore OS. It is the recommended starting point for external evaluation, desktop installation, and release-note reference. See [Public Release Guide](docs/PUBLIC_RELEASE.md).
+- macOS：直接安装 `.dmg`
+- Windows：直接运行 `.exe`
 
-Current desktop build snapshot: **0.2.0-beta.2**
+如果你要自行验证桌面构建链，请看：
 
-- macOS (Apple Silicon / aarch64 DMG): <http://59.110.93.188/downloads/AgentCore.OS_0.2.0-beta.2_aarch64.dmg>
-- Windows (x64 EXE installer): <http://59.110.93.188/downloads/AgentCore.OS_0.2.0-beta.2_x64_setup.exe>
+- [命令行安装说明](docs/COMMAND_LINE_INSTALL.zh-CN.md)
+- [macOS 未签名安装说明](docs/MACOS_UNSIGNED_INSTALL.zh-CN.md)
+- [macOS 签名与公证说明](docs/MACOS_SIGNING_AND_NOTARIZATION.zh-CN.md)
 
-If you want to validate packaging locally instead of downloading a prebuilt installer, see:
-- [Getting Started](docs/GETTING_STARTED.md)
-- [Windows Desktop Testing](docs/WINDOWS_DESKTOP_TESTING.md)
+## 核心能力概览
 
-### Optional local connector
+当前版本已经具备这些基础能力：
 
-Run the local connector example:
+- 桌面壳与多窗口交互
+- 行业工作区与场景入口
+- 多个业务应用集成到同一工作台
+- 一个跨应用 Hero Workflow 已可跑通
+- 多语言入口与首次启动引导
+- 本地优先的运行方式与可控审批边界
 
-```bash
-npm run webhook:dev
-```
+## 文档入口
 
-Optional: run the publish queue worker separately without depending on a browser tab:
+### 建议先看
 
-```bash
-npm run publish-queue:worker
-```
+- [文档总入口](docs/DOCUMENTATION_INDEX.zh-CN.md)
+- [用户指南（中文）](docs/USER_GUIDE.zh-CN.md)
+- [当前版本发布说明](docs/releases/v0.2.0-beta.2.md)
+- [对外分发说明](docs/EARLY_ACCESS_RELEASE.zh-CN.md)
 
-Production deployment examples are located in [`deploy/`](deploy/).
-Template notes are in [`deploy/README.md`](deploy/README.md).
+### 安装与发布相关
 
-## Main scripts
+- [命令行安装说明](docs/COMMAND_LINE_INSTALL.zh-CN.md)
+- [macOS 未签名安装说明](docs/MACOS_UNSIGNED_INSTALL.zh-CN.md)
+- [macOS 签名与公证说明](docs/MACOS_SIGNING_AND_NOTARIZATION.zh-CN.md)
+- [公开发布说明](docs/PUBLIC_RELEASE.md)
 
-- `npm run dev` — start in development mode
-- `npm run dev:clean` — clean `.next-dev` and start development
-- `npm run build` — production build
-- `npm run start` — start production service
-- `npm run stable` — clean rebuild and start stable version
-- `npm run lint` — run lint
-- `npm run webhook:dev` — start the local webhook connector example
-- `npm run publish-queue:worker` — run the background publish queue worker
+### 其他核心文档
 
-## Documentation entry points
+- [快速开始](docs/GETTING_STARTED.md)
+- [架构说明](docs/ARCHITECTURE.md)
+- [连接器说明](docs/CONNECTORS.md)
+- [使用场景](docs/USE_CASES.md)
+- [配置说明](docs/CONFIGURATION.md)
+- [部署说明](docs/DEPLOYMENT.md)
+- [排障说明](docs/TROUBLESHOOTING.md)
 
-### Start here
-- [Getting Started](docs/GETTING_STARTED.md)
-- [Documentation Index (ZH)](docs/DOCUMENTATION_INDEX.zh-CN.md)
-- [User Guide (ZH)](docs/USER_GUIDE.zh-CN.md)
-- [Architecture](docs/ARCHITECTURE.md)
-- [Solution OS Direction](docs/SOLUTION_OS.md)
-- [Hero Workflow Strategy](docs/HERO_WORKFLOW.md)
-- [Connectors](docs/CONNECTORS.md)
-- [Connector Recipes](docs/CONNECTOR_RECIPES.md)
-- [Use Cases](docs/USE_CASES.md)
-- [Privacy](docs/PRIVACY.md)
+## 常用脚本
 
-### Operational docs
-- [Public Release Guide](docs/PUBLIC_RELEASE.md)
-- [Early Access Release (ZH)](docs/EARLY_ACCESS_RELEASE.zh-CN.md)
-- [Command Line Install (ZH)](docs/COMMAND_LINE_INSTALL.zh-CN.md)
-- [macOS Unsigned Install (ZH)](docs/MACOS_UNSIGNED_INSTALL.zh-CN.md)
-- [macOS Signing & Notarization (ZH)](docs/MACOS_SIGNING_AND_NOTARIZATION.zh-CN.md)
-- [Configuration](docs/CONFIGURATION.md)
-- [Deployment](docs/DEPLOYMENT.md)
-- [Next Steps](docs/NEXT_STEPS.md)
-- [Troubleshooting](docs/TROUBLESHOOTING.md)
-- [Roadmap](docs/ROADMAP.md)
-- [Open Source Checklist](docs/OPEN_SOURCE_CHECKLIST.md)
-- [Releasing](RELEASING.md)
+- `npm run dev`：开发模式启动
+- `npm run dev:clean`：清理后启动开发模式
+- `npm run build`：生产构建
+- `npm run start`：启动生产服务
+- `npm run stable`：清理重建并启动稳定版本
+- `npm run lint`：运行 lint
+- `npm run webhook:dev`：启动本地 webhook connector 示例
+- `npm run publish-queue:worker`：运行后台发布队列 worker
 
-### Release notes
-- [Public Release Guide](docs/PUBLIC_RELEASE.md)
-- [2026-03-14 public release refactor log](docs/releases/2026-03-14.md)
-- [v0.1.0](docs/releases/v0.1.0.md)
-- [v0.2.0-alpha.1](docs/releases/v0.2.0-alpha.1.md)
-- [v0.2.0-beta.1](docs/releases/v0.2.0-beta.1.md)
-- [v0.2.0-beta.2](docs/releases/v0.2.0-beta.2.md)
-- [v0.2.0 (draft)](docs/releases/v0.2.0-draft.md)
+## 开源协议
 
-## Repository structure
+AgentCore OS 采用 **Apache License 2.0** 开源。
 
-```text
-src/
-  app/            Next.js App Router pages and API routes
-  components/     Desktop shell and app window components
-  lib/            Local-first state and helper modules
-scripts/
-  webhook-connector/   Local example connector
-docs/
-deploy/
-```
+请注意：
 
-## Security and compliance
+- **本仓库源代码** 按 Apache-2.0 许可发布
+- **Logo、商标、产品名和品牌资产** 不默认随软件许可证一起授权，除非另有明确说明
+- 第三方依赖仍遵循各自原有许可证
 
-If you want to build automated publishing capabilities, use:
-- official platform APIs, or
-- compliant third-party services (such as Buffer / Metricool / Make / Zapier), or
-- internal tools with explicit user authorization
+详见：
 
-The goal of this repository is to be a practical AI work platform, not a loophole tool for bypassing platform rules.
-
-## Pre-open-source checklist
-
-Before publishing externally, we recommend:
-- Check [docs/OPEN_SOURCE_CHECKLIST.md](docs/OPEN_SOURCE_CHECKLIST.md)
-- Confirm that no secrets, private identifiers, or build artifacts are committed
-- Run `npm run lint` and `npm run build`
-
-## Open Source License
-
-AgentCore OS is open source under the **Apache License 2.0**.
-
-We chose Apache-2.0 to support broad adoption across individual, startup, and enterprise use cases, while providing a clear patent grant and permissive redistribution terms.
-
-Please note:
-
-- **Source code** in this repository is licensed under Apache-2.0.
-- **Logos, trademarks, product names, and brand assets** are **not** granted under the software license unless explicitly stated otherwise.
-- Third-party dependencies remain under their own respective licenses.
-
-See [LICENSE](LICENSE) and [NOTICE](NOTICE) for details.
+- [LICENSE](LICENSE)
+- [NOTICE](NOTICE)
