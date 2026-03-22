@@ -11,6 +11,7 @@ export type SupportTicket = {
   message: string;
   status: SupportStatus;
   replyDraft: string;
+  reviewNotes: string;
   createdAt: number;
   updatedAt: number;
 } & SupportWorkflowMeta;
@@ -62,6 +63,7 @@ export function createSupportTicket(input?: Partial<Omit<SupportTicket, "id" | "
     message: input?.message ?? "",
     status: input?.status ?? "new",
     replyDraft: input?.replyDraft ?? "",
+    reviewNotes: input?.reviewNotes ?? "",
     workflowRunId: input?.workflowRunId,
     workflowScenarioId: input?.workflowScenarioId,
     workflowStageId: input?.workflowStageId,

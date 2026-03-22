@@ -24,6 +24,7 @@ export type SalesAssetRecord = {
   quoteStatus: string;
   latestDraftSubject: string;
   latestDraftBody: string;
+  assetDraft: string;
   status: SalesAssetStatus;
   createdAt: number;
   updatedAt: number;
@@ -111,6 +112,7 @@ export function upsertSalesAsset(
         quoteStatus: patch.quoteStatus ?? "not_started",
         latestDraftSubject: patch.latestDraftSubject ?? "",
         latestDraftBody: patch.latestDraftBody ?? "",
+        assetDraft: patch.assetDraft ?? "",
         status: patch.status ?? "qualifying",
         createdAt: now,
         updatedAt: now,

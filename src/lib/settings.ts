@@ -1,4 +1,5 @@
 import type { AppId } from "@/apps/types";
+import type { AgentProfileId } from "@/lib/agent-profiles";
 import type { WorkspaceIndustryId } from "@/lib/workspace-presets";
 import { getJsonFromStorage, setJsonToStorage } from "@/lib/storage";
 
@@ -25,6 +26,7 @@ export type LlmLibrarySettings = {
 
 export type AssistantSettings = {
   systemPrompt: string;
+  expertProfiles: Record<AgentProfileId, { enabled: boolean }>;
 };
 
 export type OpenClawEngineSettings = {
@@ -113,6 +115,13 @@ export const defaultSettings: AppSettings = {
   },
   assistant: {
     systemPrompt: "",
+    expertProfiles: {
+      sales_qualification_specialist: { enabled: true },
+      outreach_draft_specialist: { enabled: true },
+      support_reply_specialist: { enabled: true },
+      reality_checker: { enabled: true },
+      knowledge_asset_editor: { enabled: true },
+    },
   },
   openclaw: {
     // Leave empty by default: local-first. Creative Studio can fallback to local video-frames (ffmpeg).
@@ -255,7 +264,14 @@ function mergeSettings(saved: Partial<AppSettings> | null | undefined): AppSetti
     ...defaultSettings,
     ...(saved ?? {}),
     llm: llmMerged,
-    assistant: { ...defaultSettings.assistant, ...(saved?.assistant ?? {}) },
+    assistant: {
+      ...defaultSettings.assistant,
+      ...(saved?.assistant ?? {}),
+      expertProfiles: {
+        ...defaultSettings.assistant.expertProfiles,
+        ...(saved?.assistant?.expertProfiles ?? {}),
+      },
+    },
     openclaw: (() => {
       const merged = { ...defaultSettings.openclaw, ...(saved?.openclaw ?? {}) };
       const legacyDefaults = new Set([

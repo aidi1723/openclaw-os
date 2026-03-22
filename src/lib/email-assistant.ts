@@ -10,6 +10,7 @@ export type EmailThread = {
   goal: string;
   tone: EmailTone;
   draft: string;
+  reviewNotes: string;
   createdAt: number;
   updatedAt: number;
 } & SalesWorkflowMeta;
@@ -61,6 +62,7 @@ export function createEmailThread(input?: Partial<Omit<EmailThread, "id" | "crea
     goal: input?.goal ?? "",
     tone: input?.tone ?? "professional",
     draft: input?.draft ?? "",
+    reviewNotes: input?.reviewNotes ?? "",
     workflowRunId: input?.workflowRunId,
     workflowScenarioId: input?.workflowScenarioId,
     workflowStageId: input?.workflowStageId,

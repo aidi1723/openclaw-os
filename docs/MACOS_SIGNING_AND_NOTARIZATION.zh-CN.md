@@ -1,6 +1,8 @@
 # macOS 签名与公证说明
 
-本文用于说明 AgentCore OS 当前 macOS 分发包在签名与公证方面的状态。
+本文用于说明历史或未来桌面包分发时，macOS 签名与公证相关状态。
+
+当前公开推荐安装方式是命令行安装 / 从源码运行，不以安装包作为默认分发路径。
 
 ## 当前状态
 
@@ -22,5 +24,6 @@
 
 ## 配套文档
 
+- [命令行安装说明](COMMAND_LINE_INSTALL.zh-CN.md)
 - [macOS 未签名安装说明](MACOS_UNSIGNED_INSTALL.zh-CN.md)
-- [当前版本发布说明](releases/v1.0.0.md)
+- [当前版本发布说明](releases/v1.1.0.md)

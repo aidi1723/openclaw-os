@@ -34,6 +34,7 @@ import {
   listCategoryMetas,
 } from "@/lib/app-display";
 import { buildAgentCoreApiUrl } from "@/lib/app-api";
+import { listAgentProfiles } from "@/lib/agent-profiles";
 import {
   getDesktopRuntimeStatusSummary,
   getRuntimeBridgeConfig,
@@ -228,6 +229,7 @@ export function SettingsAppWindow({
       ] as const,
     [],
   );
+  const expertProfiles = useMemo(() => listAgentProfiles(), []);
 
   const backgroundOptions = useMemo(
     () => [
@@ -865,6 +867,62 @@ export function SettingsAppWindow({
                     placeholder={assistantPromptHint}
                     className="h-40 w-full resize-none rounded-2xl border border-gray-300 px-4 py-3 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
+                </div>
+
+                <div className="rounded-2xl border border-gray-200 p-5 bg-white space-y-4">
+                  <div>
+                    <div className="text-sm font-semibold text-gray-900">专家角色白名单</div>
+                    <div className="text-xs text-gray-500 mt-1">
+                      只启用少量高价值数字员工角色。关闭后，请求会退回普通助手模式。建议优先保留销售资格判断、销售跟进、客服回复和 Reality Checker。
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
+                    {expertProfiles.map((profile) => {
+                      const enabled = form.assistant.expertProfiles[profile.id]?.enabled !== false;
+                      return (
+                        <label
+                          key={profile.id}
+                          className={[
+                            "flex items-start gap-3 rounded-2xl border p-4 transition-colors",
+                            enabled ? "border-emerald-200 bg-emerald-50/70" : "border-gray-200 bg-gray-50",
+                          ].join(" ")}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={enabled}
+                            onChange={(e) =>
+                              setForm((prev) => ({
+                                ...prev,
+                                assistant: {
+                                  ...prev.assistant,
+                                  expertProfiles: {
+                                    ...prev.assistant.expertProfiles,
+                                    [profile.id]: { enabled: e.target.checked },
+                                  },
+                                },
+                              }))
+                            }
+                            className="mt-1 h-4 w-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
+                          />
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                              <div className="text-sm font-semibold text-gray-900">{profile.title}</div>
+                              <span
+                                className={[
+                                  "rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em]",
+                                  enabled ? "bg-emerald-100 text-emerald-700" : "bg-gray-200 text-gray-600",
+                                ].join(" ")}
+                              >
+                                {enabled ? "Enabled" : "Disabled"}
+                              </span>
+                            </div>
+                            <div className="mt-1 text-xs leading-5 text-gray-600">{profile.purpose}</div>
+                          </div>
+                        </label>
+                      );
+                    })}
+                  </div>
                 </div>
               </section>
             )}

@@ -19,8 +19,14 @@ import {
 import { createDraft } from "@/lib/drafts";
 import { getOutputLanguageInstruction } from "@/lib/language";
 import { requestOpenClawAgent } from "@/lib/openclaw-agent-client";
-import { upsertSalesAsset } from "@/lib/sales-assets";
+import { upsertKnowledgeAsset } from "@/lib/knowledge-assets";
+import {
+  getSalesAssetByWorkflowRunId,
+  subscribeSalesAssets,
+  upsertSalesAsset,
+} from "@/lib/sales-assets";
 import { createTask, updateTask } from "@/lib/tasks";
+import { requestOpenKnowledgeVault } from "@/lib/ui-events";
 import type { PersonalCrmPrefill } from "@/lib/ui-events";
 import { completeWorkflowRun } from "@/lib/workflow-runs";
 
@@ -63,6 +69,7 @@ export function PersonalCRMAppWindow({
   const [contacts, setContacts] = useState<ContactRecord[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [suggestion, setSuggestion] = useState("");
+  const [assetRevision, setAssetRevision] = useState(0);
   const [isGenerating, setIsGenerating] = useState(false);
   const { toast, showToast } = useTimedToast(2200);
 
@@ -109,6 +116,17 @@ export function PersonalCRMAppWindow({
   }, [showToast]);
 
   useEffect(() => {
+    const bump = () => setAssetRevision((value) => value + 1);
+    const off = subscribeSalesAssets(bump);
+    const onStorage = () => bump();
+    window.addEventListener("storage", onStorage);
+    return () => {
+      off();
+      window.removeEventListener("storage", onStorage);
+    };
+  }, []);
+
+  useEffect(() => {
     const onSelect = (event: Event) => {
       const contactId = (event as CustomEvent<{ contactId?: string }>).detail?.contactId;
       if (!contactId) return;
@@ -125,6 +143,10 @@ export function PersonalCRMAppWindow({
     () => contacts.find((contact) => contact.id === selectedId) ?? null,
     [contacts, selectedId],
   );
+  const currentSalesAsset = useMemo(() => {
+    void assetRevision;
+    return getSalesAssetByWorkflowRunId(selected?.workflowRunId);
+  }, [assetRevision, selected?.workflowRunId]);
 
   const stats = useMemo(
     () => ({
@@ -243,10 +265,41 @@ export function PersonalCRMAppWindow({
     showToast("已保存到草稿", "ok");
   };
 
-  const completeSalesWorkflow = () => {
+  const completeSalesWorkflow = async () => {
     if (!selected) {
       showToast("请先选择联系人", "error");
       return;
+    }
+    let assetDraft = "";
+    try {
+      assetDraft = await requestOpenClawAgent({
+        message: [
+          "请把下面这轮销售推进结果整理成一份可复用的销售资产草稿。",
+          `${getOutputLanguageInstruction()}`,
+          "要求：",
+          "1) 使用以下标题输出：",
+          "【适用场景】",
+          "【客户画像与偏好】",
+          "【有效跟进策略】",
+          "【禁忌与风险】",
+          "【下次可复用模板】",
+          "2) 严格基于已知信息，不要编造客户背景或成交结果。",
+          "",
+          `联系人：${selected.name}`,
+          `公司：${selected.company || "(未填)"}`,
+          `角色：${selected.role || "(未填)"}`,
+          `状态：${selected.status}`,
+          `最近联系：${selected.lastTouch || "(未填)"}`,
+          `下一步：${selected.nextStep || "(未填)"}`,
+          `备注：${selected.notes || "(未填)"}`,
+          `当前建议：${suggestion || "(未生成)"}`,
+        ].join("\n"),
+        sessionId: "webos-personal-crm-assetize",
+        timeoutSeconds: 60,
+        expertProfileId: "knowledge_asset_editor",
+      });
+    } catch {
+      assetDraft = "";
     }
     patchSelected({
       workflowSource: "Personal CRM 已完成本轮客户推进记录",
@@ -264,12 +317,60 @@ export function PersonalCRMAppWindow({
         objectionNotes: suggestion,
         nextAction: "当前轮次已完成，下一次可按客户反馈重新启动跟进。",
         latestDraftBody: suggestion,
+        assetDraft,
         quoteStatus: "completed",
         status: "completed",
       });
       completeWorkflowRun(selected.workflowRunId);
     }
+    if (assetDraft.trim()) {
+      requestOpenKnowledgeVault({
+        query: assetDraft,
+      });
+    }
     showToast("已完成销售 Hero Workflow", "ok");
+  };
+
+  const saveSalesAssetToVault = () => {
+    if (!selected?.workflowRunId) {
+      showToast("请先完成一轮销售流程", "error");
+      return;
+    }
+    const salesAsset = getSalesAssetByWorkflowRunId(selected.workflowRunId);
+    const sourceKey = `sales:${selected.workflowRunId}`;
+    const body =
+      salesAsset?.assetDraft ||
+      [
+      `联系人：${selected.name || "(未填)"}`,
+      `公司：${selected.company || "(未填)"}`,
+      `角色：${selected.role || "(未填)"}`,
+      `下一步：${selected.nextStep || "(未填)"}`,
+      `备注：${selected.notes || "(未填)"}`,
+      suggestion ? `当前推进建议：\n${suggestion}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+    upsertKnowledgeAsset(sourceKey, {
+      title: `${selected.company || selected.name || "销售"} · 跟进资产`,
+      body,
+      sourceApp: "personal_crm",
+      scenarioId: selected.workflowScenarioId ?? "sales-pipeline",
+      workflowRunId: selected.workflowRunId,
+      assetType: "sales_playbook",
+      status: "active",
+      tags: ["sales", "crm", "followup", "playbook"],
+      applicableScene: "销售跟进 / CRM 收口 / 下次客户推进复用",
+      sourceJumpTarget: {
+        kind: "record",
+        appId: "personal_crm",
+        eventName: "openclaw:crm-select",
+        eventDetail: { contactId: selected.id },
+      },
+    });
+    requestOpenKnowledgeVault({
+      query: selected.company || selected.name || "销售资产",
+    });
+    showToast("销售资产已确认入库", "ok");
   };
 
   return (
@@ -325,6 +426,12 @@ export function PersonalCRMAppWindow({
                 label: "完成本轮流程",
                 onClick: completeSalesWorkflow,
                 disabled: !selected,
+                tone: "secondary",
+              },
+              {
+                label: "确认入库",
+                onClick: saveSalesAssetToVault,
+                disabled: !selected?.workflowRunId,
                 tone: "secondary",
               },
             ]}
@@ -536,6 +643,44 @@ export function PersonalCRMAppWindow({
                 ) : (
                   <div className="flex min-h-[240px] items-center justify-center rounded-2xl border border-dashed border-gray-200 bg-gray-50 text-sm text-gray-500">
                     生成后，这里会出现跟进策略和消息草稿。
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-gray-200 bg-white p-5">
+              <div className="flex flex-col gap-3 border-b border-gray-200 pb-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <div className="text-sm font-semibold text-gray-900">销售资产草稿</div>
+                  <div className="mt-1 text-xs text-gray-500">
+                    这里是 Knowledge Asset Editor 整理出的销售沉淀草稿。你可以先编辑，再确认入库。
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={saveSalesAssetToVault}
+                  disabled={!selected?.workflowRunId || !currentSalesAsset?.assetDraft?.trim()}
+                  className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700 transition-colors hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  确认入库
+                </button>
+              </div>
+
+              <div className="pt-4">
+                {currentSalesAsset?.assetDraft ? (
+                  <textarea
+                    value={currentSalesAsset.assetDraft}
+                    onChange={(e) => {
+                      if (!selected?.workflowRunId) return;
+                      upsertSalesAsset(selected.workflowRunId, {
+                        assetDraft: e.target.value,
+                      });
+                    }}
+                    className="h-[220px] w-full resize-none rounded-2xl border border-gray-300 px-4 py-3 text-sm leading-7 text-gray-900 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                ) : (
+                  <div className="flex min-h-[180px] items-center justify-center rounded-2xl border border-dashed border-gray-200 bg-gray-50 text-sm text-gray-500">
+                    完成本轮流程后，这里会出现可编辑的销售资产草稿。
                   </div>
                 )}
               </div>

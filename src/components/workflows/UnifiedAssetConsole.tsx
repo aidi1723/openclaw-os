@@ -91,6 +91,7 @@ function buildSalesEntries(items: SalesAssetRecord[]): AssetConsoleEntry[] {
     workflowLabel: "Sales Pipeline",
     title: asset.company || asset.contactName || "销售资产",
     detail:
+      asset.assetDraft ||
       asset.latestDraftSubject ||
       asset.nextAction ||
       asset.requirementSummary ||

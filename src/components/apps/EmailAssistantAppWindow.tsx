@@ -18,7 +18,7 @@ import {
   type EmailThread,
   type EmailTone,
 } from "@/lib/email-assistant";
-import { requestOpenClawAgent } from "@/lib/openclaw-agent-client";
+import { requestOpenClawAgent, requestRealityCheck } from "@/lib/openclaw-agent-client";
 import { upsertSalesAsset } from "@/lib/sales-assets";
 import { createTask, updateTask } from "@/lib/tasks";
 import type { EmailAssistantPrefill } from "@/lib/ui-events";
@@ -166,12 +166,14 @@ export function EmailAssistantAppWindow({
     setIsGenerating(true);
     try {
       const message =
-        "你是 Email Assistant。请根据用户信息生成一封中文邮件草稿。\n" +
+        "请根据用户信息生成一封可直接人工审核的邮件草稿。\n" +
         `${getOutputLanguageInstruction()}\n` +
         "要求：\n" +
-        "1) 结构清楚，直接可发。\n" +
+        "1) 结构清楚，结尾要有清晰下一步。\n" +
         "2) 语气按照指定风格。\n" +
-        "3) 不要空话，结尾要有清晰下一步。\n\n" +
+        "3) 不得编造价格、折扣、交期、MOQ、规格或合同承诺。\n" +
+        "4) 如果关键事实缺失，使用待确认表达，不要自行补全。\n" +
+        "5) 输出只能是邮件正文，不要附加解释。\n\n" +
         `主题：${selected.subject}\n` +
         `收件人：${selected.recipient || "(未填)"}\n` +
         `风格：${selected.tone}\n` +
@@ -182,9 +184,30 @@ export function EmailAssistantAppWindow({
         message,
         sessionId: "webos-email-assistant",
         timeoutSeconds: 90,
+        expertProfileId: "outreach_draft_specialist",
       });
+      const nextDraft = text || fallback;
+      let reviewNotes = "";
+      try {
+        reviewNotes = await requestRealityCheck({
+          taskLabel: "销售跟进邮件草稿",
+          sourceContext: [
+            `主题：${selected.subject}`,
+            `收件人：${selected.recipient || "(未填)"}`,
+            `风格：${selected.tone}`,
+            `背景：${selected.context || "(未填)"}`,
+            `目标：${selected.goal || "(未填)"}`,
+          ].join("\n"),
+          candidateOutput: nextDraft,
+          sessionId: "webos-email-assistant-review",
+          timeoutSeconds: 45,
+        });
+      } catch {
+        reviewNotes = "";
+      }
       patchSelected({
-        draft: text || fallback,
+        draft: nextDraft,
+        reviewNotes,
         workflowStageId: selected.workflowRunId ? "outreach" : selected.workflowStageId,
         workflowSource: selected.workflowSource || "Email Assistant 已接收销售跟进上下文",
         workflowNextStep: "人工检查邮件语气、报价边界和 CTA，确认后再同步到 Personal CRM。",
@@ -203,7 +226,7 @@ export function EmailAssistantAppWindow({
           objectionNotes: extractContextValue(selected.context, "当前判断"),
           nextAction: "人工审核这封跟进邮件，然后把结果同步到 Personal CRM。",
           latestDraftSubject: selected.subject,
-          latestDraftBody: text || fallback,
+          latestDraftBody: nextDraft,
           quoteStatus: "drafted",
           status: "awaiting_review",
         });
@@ -215,6 +238,7 @@ export function EmailAssistantAppWindow({
       const errorMessage = err instanceof Error ? err.message : "生成失败";
       patchSelected({
         draft: fallback,
+        reviewNotes: "",
         workflowSource: selected.workflowSource || "Email Assistant 本地兜底生成邮件草稿",
         workflowNextStep: "建议人工检查后，再继续同步到 CRM。",
       });
@@ -509,7 +533,7 @@ export function EmailAssistantAppWindow({
                 {selected?.draft ? (
                   <textarea
                     value={selected.draft}
-                    onChange={(e) => patchSelected({ draft: e.target.value })}
+                    onChange={(e) => patchSelected({ draft: e.target.value, reviewNotes: "" })}
                     className="h-[280px] w-full resize-none rounded-2xl border border-gray-300 px-4 py-3 text-sm leading-7 text-gray-900 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 ) : (
@@ -518,6 +542,17 @@ export function EmailAssistantAppWindow({
                   </div>
                 )}
               </div>
+
+              {selected?.reviewNotes ? (
+                <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4">
+                  <div className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-700">
+                    Reality Checker
+                  </div>
+                  <pre className="mt-2 whitespace-pre-wrap text-sm leading-6 text-amber-950">
+                    {selected.reviewNotes}
+                  </pre>
+                </div>
+              ) : null}
             </div>
           </main>
           </div>

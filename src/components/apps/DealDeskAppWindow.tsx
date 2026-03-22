@@ -18,7 +18,7 @@ import {
   type DealRecord,
   type DealStage,
 } from "@/lib/deals";
-import { requestOpenClawAgent } from "@/lib/openclaw-agent-client";
+import { requestOpenClawAgent, requestRealityCheck } from "@/lib/openclaw-agent-client";
 import { upsertSalesAsset } from "@/lib/sales-assets";
 import {
   buildSalesWorkflowMeta,
@@ -260,12 +260,13 @@ export function DealDeskAppWindow({
     setIsGenerating(true);
     try {
       const message =
-        "你是 Deal Desk 助手。请根据用户给出的线索信息，输出中文资格判断简报。\n" +
+        "请根据当前线索信息输出一份中文资格判断简报。\n" +
         `${getOutputLanguageInstruction()}\n` +
         "要求：\n" +
-        "1) 先判断当前线索是否值得推进。\n" +
-        "2) 指出缺失信息和风险点。\n" +
-        "3) 给出下一步建议，尽量可执行。\n\n" +
+        "1) 严格基于已给信息判断，不要编造预算、规格、交期、MOQ 或客户意图。\n" +
+        "2) 如果信息不足，明确指出还缺哪些关键字段。\n" +
+        "3) 输出必须使用以下标题：\n" +
+        "【是否值得推进】\n【判断理由】\n【缺失信息】\n【风险点】\n【建议下一步】\n\n" +
         `公司：${selected.company}\n` +
         `联系人：${selected.contact || "(未填)"}\n` +
         `询盘来源：${selected.inquiryChannel || "(未填)"}\n` +
@@ -280,10 +281,35 @@ export function DealDeskAppWindow({
         message,
         sessionId: "webos-deal-desk",
         timeoutSeconds: 90,
+        expertProfileId: "sales_qualification_specialist",
       });
+      const nextBrief = text || fallback;
+      let reviewNotes = "";
+      try {
+        reviewNotes = await requestRealityCheck({
+          taskLabel: "销售资格判断简报",
+          sourceContext: [
+            `公司：${selected.company}`,
+            `联系人：${selected.contact || "(未填)"}`,
+            `询盘来源：${selected.inquiryChannel || "(未填)"}`,
+            `产品线：${selected.productLine || "(未填)"}`,
+            `语言偏好：${selected.preferredLanguage || "(未填)"}`,
+            `需求：${selected.need || "(未填)"}`,
+            `预算：${selected.budget || "(未填)"}`,
+            `时间：${selected.timing || "(未填)"}`,
+            `备注：${selected.notes || "(未填)"}`,
+          ].join("\n"),
+          candidateOutput: nextBrief,
+          sessionId: "webos-deal-desk-review",
+          timeoutSeconds: 45,
+        });
+      } catch {
+        reviewNotes = "";
+      }
       const run = runId ? getWorkflowRun(runId) : null;
       patchSelected({
-        brief: text || fallback,
+        brief: nextBrief,
+        reviewNotes,
         stage: selected.stage === "new" ? "qualified" : selected.stage,
         workflowRunId: runId ?? selected.workflowRunId,
         workflowScenarioId: selected.workflowScenarioId ?? "sales-pipeline",
@@ -300,10 +326,10 @@ export function DealDeskAppWindow({
           inquiryChannel: selected.inquiryChannel,
           preferredLanguage: selected.preferredLanguage,
           productLine: selected.productLine,
-          requirementSummary: selected.need || text || fallback,
+          requirementSummary: selected.need || nextBrief,
           preferenceNotes: selected.notes,
           nextAction: "进入 Email Assistant 生成并审核首轮跟进邮件。",
-          quoteNotes: text || fallback,
+          quoteNotes: nextBrief,
           quoteStatus: "drafted",
           status: "qualifying",
         });
@@ -317,6 +343,7 @@ export function DealDeskAppWindow({
       const errorMessage = err instanceof Error ? err.message : "生成失败";
       patchSelected({
         brief: fallback,
+        reviewNotes: "",
         workflowSource: "Deal Desk 本地兜底生成资格判断",
         workflowNextStep: "建议检查判断内容后，再把线索送入邮件跟进阶段。",
       });
@@ -397,6 +424,7 @@ export function DealDeskAppWindow({
         `预算：${selected.budget || "(未填)"}`,
         `时间：${selected.timing || "(未填)"}`,
         selected.brief ? `当前判断：\n${selected.brief}` : "",
+        selected.reviewNotes ? `Reality Checker 复核：\n${selected.reviewNotes}` : "",
       ]
         .filter(Boolean)
         .join("\n"),
@@ -712,7 +740,7 @@ export function DealDeskAppWindow({
                 {selected?.brief ? (
                   <textarea
                     value={selected.brief}
-                    onChange={(e) => patchSelected({ brief: e.target.value })}
+                    onChange={(e) => patchSelected({ brief: e.target.value, reviewNotes: "" })}
                     className="h-[280px] w-full resize-none rounded-2xl border border-gray-300 px-4 py-3 text-sm leading-7 text-gray-900 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 ) : (
@@ -721,6 +749,17 @@ export function DealDeskAppWindow({
                   </div>
                 )}
               </div>
+
+              {selected?.reviewNotes ? (
+                <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4">
+                  <div className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-700">
+                    Reality Checker
+                  </div>
+                  <pre className="mt-2 whitespace-pre-wrap text-sm leading-6 text-amber-950">
+                    {selected.reviewNotes}
+                  </pre>
+                </div>
+              ) : null}
             </div>
           </main>
           </div>

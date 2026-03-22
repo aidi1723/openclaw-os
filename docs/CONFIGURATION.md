@@ -35,7 +35,7 @@ Configure these if you need:
 Configure this only if you are actively touching `lobster-src/`:
 
 - switch Node runtime to `24.x` before installing dependencies there
-- keep the AgentCore repo on Node `18+`
+- keep the AgentCore repo on Node `20+`
 - re-run desktop smoke tests after any Lobster upstream sync
 
 ## Runtime and storage map
@@ -91,6 +91,7 @@ You only need:
 
 - LLM provider settings
 - optional OpenClaw engine endpoint
+- Node.js `20+`
 
 You do not need:
 

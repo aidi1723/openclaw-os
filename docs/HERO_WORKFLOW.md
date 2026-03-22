@@ -110,3 +110,54 @@ As of `2026-03-11`, the first runnable pass of the recommended hero workflow is 
 - a dedicated local `sales assets` store now preserves requirement summary, follow-up context, and next-step guidance
 
 This is intentionally still narrow. The right next step is not adding more desks at the same depth, but making this chain smarter and more connector-ready.
+
+## Current stable implementation update
+
+As of `2026-03-22`, the product spine is now clearer:
+
+- industry
+- role
+- workflow
+- approval
+- asset
+
+Two high-frequency chains now have the most concrete product depth:
+
+### 1. Sales chain
+
+- `Deal Desk` handles inquiry intake and qualification
+- `Email Assistant` handles outreach drafting and review
+- `Personal CRM` closes the loop and produces reusable sales assets
+- `Knowledge Vault` stores, audits, edits, and reuses those assets
+
+### 2. Support chain
+
+- `Support Copilot` handles issue intake and reply drafting
+- `Reality Checker` provides a review-stage risk screen
+- FAQ / escalation-boundary assets can be confirmed into `Knowledge Vault`
+- stored assets can be reused back into the next support run
+
+### 3. Why this matters
+
+This is now closer to a real workflow OS instead of a desk gallery because:
+
+- the system has observable state
+- the human review boundary is explicit
+- outputs can be accumulated into reusable assets
+- those assets can be edited, audited, and reused in later runs
+
+### 4. Curated digital employees, not a role explosion
+
+The current direction is intentionally conservative.
+
+AgentCore OS does not try to expose dozens of free-floating agents at the same level.
+
+Instead, a small expert whitelist is bound to specific workflow stages:
+
+- qualification
+- outreach drafting
+- support reply
+- reality check
+- knowledge asset editing
+
+That keeps the system more stable, more reviewable, and easier to operate in real business work.

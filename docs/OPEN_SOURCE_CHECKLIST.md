@@ -67,6 +67,20 @@ npm run build
 git status
 ```
 
+## 6.1) Command-line release sanity
+
+For the current public release line, the recommended distribution path is command-line install from source.
+
+Before publishing:
+
+- ensure README points to command-line install first
+- ensure `docs/COMMAND_LINE_INSTALL.zh-CN.md` matches the current version
+- ensure release notes do not promise DMG / EXE installers unless they really exist
+- ensure version numbers match across:
+  - `package.json`
+  - `src-tauri/Cargo.toml`
+  - `src-tauri/tauri.conf.json`
+
 ## 7) Final release sanity check
 
 Before pushing or tagging, ask:

@@ -2,6 +2,60 @@
 
 ## Unreleased
 
+- Release prep and documentation polish for the `v1.1.0` line.
+
+## v1.1.0 - 2026-03-22
+
+### Sales and Support Workflow Upgrade
+
+- Added a curated expert-role layer for high-frequency sales and support chains.
+- Added stage-bound expert profiles:
+  - `sales_qualification_specialist`
+  - `outreach_draft_specialist`
+  - `support_reply_specialist`
+  - `reality_checker`
+  - `knowledge_asset_editor`
+- Deal qualification, outreach drafting, and support reply generation can now call expert-bound prompts while still staying inside existing workflow boundaries.
+- Added `Reality Checker` as a review-stage safety layer before approval and handoff.
+- Added expert-profile enable/disable controls in Settings so only a small approved whitelist is active.
+
+### Workflow Asset Accumulation
+
+- Sales and support records now persist review notes for human-visible audit.
+- Completed sales and support workflows can now generate structured reusable asset drafts instead of only freeform text.
+- Added a dedicated `knowledge-assets` store for structured process assets with status, tags, reuse count, and source jump targets.
+- Personal CRM now supports confirming sales asset drafts into Knowledge Vault.
+- Support Copilot now supports confirming FAQ / escalation-boundary assets into Knowledge Vault.
+
+### Knowledge Vault
+
+- Added a `流程资产` section to Knowledge Vault for structured sales and support assets.
+- Added search, active/archived filtering, archive/restore, remove, source jump, and reuse counting for process assets.
+- Upgraded one-click reuse from raw body injection to structured prefill parsing for:
+  - `Deal Desk`
+  - `Support Copilot`
+- Knowledge Vault assets can now be edited in place:
+  - title
+  - applicable scene
+  - tags
+  - body
+- Asset cards now expose lineage/audit metadata:
+  - workflow run id
+  - source key
+  - created time
+  - updated time
+
+### Documentation and Release
+
+- Aligned release-facing docs, product docs, and version references around `v1.1.0`.
+- Added a dedicated `v1.1.0` release note and launch copy.
+- Refreshed README, documentation index, user guide, hero workflow strategy, and public release guidance for the new stable line.
+
+### Verification
+
+- Verified `npm run lint`
+- Verified `npm run build`
+
 ### Desktop and Workspace
 
 - Desktop app area now groups apps by work category instead of rendering a single flat grid.

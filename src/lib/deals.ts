@@ -15,6 +15,7 @@ export type DealRecord = {
   stage: DealStage;
   notes: string;
   brief: string;
+  reviewNotes: string;
   createdAt: number;
   updatedAt: number;
 } & SalesWorkflowMeta;
@@ -71,6 +72,7 @@ export function createDeal(input?: Partial<Omit<DealRecord, "id" | "createdAt" |
     stage: input?.stage ?? "new",
     notes: input?.notes ?? "",
     brief: input?.brief ?? "",
+    reviewNotes: input?.reviewNotes ?? "",
     workflowRunId: input?.workflowRunId,
     workflowScenarioId: input?.workflowScenarioId,
     workflowStageId: input?.workflowStageId,

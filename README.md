@@ -30,21 +30,23 @@ AgentCore OS 当前更适合这样理解：
 
 ## 当前稳定版本
 
-当前推荐对外版本：**v1.0.0**
+当前推荐对外版本：**v1.1.0**
 
 当前稳定产品线聚焦：
 
 - 本地优先
 - BYOK / API Key 驱动
 - 浏览器壳 + 桌面壳双入口
-- 内容创作、销售跟进、研究分析三条核心链路
+- 销售跟进、客服处理、知识资产沉淀三条高频闭环
+- 内容创作与研究分析作为稳定基础能力
 
-获取安装包与公开发布信息，请以 GitHub Releases 页面为准：
+获取源码、版本信息与公开发布说明，请以仓库与 GitHub Releases 页面为准：
 
+- GitHub 仓库：<https://github.com/aidi1723/agentcore-os>
 - GitHub Releases：<https://github.com/aidi1723/agentcore-os/releases>
-- 当前版本发布说明：[docs/releases/v1.0.0.md](docs/releases/v1.0.0.md)
+- 当前版本发布说明：[docs/releases/v1.1.0.md](docs/releases/v1.1.0.md)
 - 对外分发说明：[docs/EARLY_ACCESS_RELEASE.zh-CN.md](docs/EARLY_ACCESS_RELEASE.zh-CN.md)
-- 市场发布文案：[docs/LAUNCH_COPY_v1.0.0.zh-CN.md](docs/LAUNCH_COPY_v1.0.0.zh-CN.md)
+- 市场发布文案：[docs/LAUNCH_COPY_v1.1.0.zh-CN.md](docs/LAUNCH_COPY_v1.1.0.zh-CN.md)
 - 文档总入口：[docs/DOCUMENTATION_INDEX.zh-CN.md](docs/DOCUMENTATION_INDEX.zh-CN.md)
 
 ## 快速开始
@@ -63,18 +65,20 @@ npm run dev
 - App UI：`http://localhost:3000/`
 - 可选本地 Connector UI：`http://127.0.0.1:8787/`
 
-### 桌面版体验
+### 命令行安装与运行
 
-如果你已下载桌面安装包：
+当前推荐安装方式只有一种：**命令行安装**。
 
-- macOS：直接安装 `.dmg`
-- Windows：直接运行 `.exe`
+```bash
+git clone https://github.com/aidi1723/agentcore-os.git
+cd agentcore-os
+npm install
+npm run dev
+```
 
-如果你要自行验证桌面构建链，请看：
+如果你要进一步验证桌面壳或本地 sidecar，请看：
 
 - [命令行安装说明](docs/COMMAND_LINE_INSTALL.zh-CN.md)
-- [macOS 未签名安装说明](docs/MACOS_UNSIGNED_INSTALL.zh-CN.md)
-- [macOS 签名与公证说明](docs/MACOS_SIGNING_AND_NOTARIZATION.zh-CN.md)
 
 ## 核心能力概览
 
@@ -83,7 +87,9 @@ npm run dev
 - 桌面壳与多窗口交互
 - 行业工作区与场景入口
 - 多个业务应用集成到同一工作台
-- 一个跨应用 Hero Workflow 已可跑通
+- 销售与客服两条高频 Hero Workflow 已可跑通
+- 结构化流程资产可入库、编辑、复用、追溯
+- 数字员工白名单与 Reality Checker 审核层
 - 多语言入口与首次启动引导
 - 本地优先的运行方式与可控审批边界
 
@@ -93,15 +99,13 @@ npm run dev
 
 - [文档总入口](docs/DOCUMENTATION_INDEX.zh-CN.md)
 - [用户指南（中文）](docs/USER_GUIDE.zh-CN.md)
-- [当前版本发布说明](docs/releases/v1.0.0.md)
+- [当前版本发布说明](docs/releases/v1.1.0.md)
 - [对外分发说明](docs/EARLY_ACCESS_RELEASE.zh-CN.md)
-- [市场发布文案](docs/LAUNCH_COPY_v1.0.0.zh-CN.md)
+- [市场发布文案](docs/LAUNCH_COPY_v1.1.0.zh-CN.md)
 
 ### 安装与发布相关
 
 - [命令行安装说明](docs/COMMAND_LINE_INSTALL.zh-CN.md)
-- [macOS 未签名安装说明](docs/MACOS_UNSIGNED_INSTALL.zh-CN.md)
-- [macOS 签名与公证说明](docs/MACOS_SIGNING_AND_NOTARIZATION.zh-CN.md)
 - [公开发布说明](docs/PUBLIC_RELEASE.md)
 
 ### 其他核心文档

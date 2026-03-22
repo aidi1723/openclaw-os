@@ -256,6 +256,12 @@ export function SalesHeroWorkflowPanel({
                 {asset?.latestDraftSubject || "等待首轮跟进邮件。"}
               </div>
             </div>
+            <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">资产草稿</div>
+              <div className="mt-2 text-sm leading-6 text-slate-200">
+                {asset?.assetDraft || "等待 CRM 收口后沉淀成可复用销售资产。"}
+              </div>
+            </div>
           </div>
         </div>
       </div>

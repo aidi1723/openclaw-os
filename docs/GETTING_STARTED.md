@@ -2,15 +2,21 @@
 
 AgentCore OS now has three practical setup tracks. Pick the lightest one that matches what you need instead of installing the full desktop toolchain by default.
 
+For the current public release line, the recommended path is still the lightest one:
+
+- clone the repo
+- install dependencies
+- run from the command line
+
 ## Choose your setup track
 
 ### 1. Browser-only
 
-Use this if you only want the web workspace and settings UI.
+Use this if you only want the web workspace and settings UI. This is also the recommended public installation path for the current stable line.
 
 Requirements:
 
-- Node.js `18+` for this repo
+- Node.js `20+` for this repo
 - npm
 
 Commands:
@@ -28,7 +34,7 @@ Use this if you want to validate the Tauri desktop app, local runtime diagnostic
 
 Requirements:
 
-- Node.js `18+` for AgentCore OS
+- Node.js `20+` for AgentCore OS
 - Rust toolchain for Tauri packaging
 - Python `3.11` or `3.12` for the packaged sidecar path
 
@@ -56,7 +62,7 @@ Requirements:
 
 Important:
 
-- The main AgentCore OS repo still runs on Node `18+`
+- The main AgentCore OS repo still runs on Node `20+`
 - `lobster-src/package.json` currently requires Node `>=24 <25`
 - Do not assume one Node version works for both repos
 
@@ -72,7 +78,7 @@ If you switch between the two repos frequently, use `nvm`, `fnm`, or `mise` so t
 
 ## Dependency matrix
 
-- `agentcore-os/`: web shell, desktop UI, Tauri packaging, Node `18+`
+- `agentcore-os/`: web shell, desktop UI, Tauri packaging, Node `20+`
 - `lobster-sidecar/`: Python HTTP adapter used by desktop builds, Python `3.11` or `3.12` recommended
 - `lobster-src/`: upstream LobsterAI checkout, Node `24.x`
 - `src-tauri/`: desktop shell packaging, Rust toolchain required
