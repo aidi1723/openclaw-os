@@ -2,7 +2,11 @@
 
 ## Unreleased
 
-- No unreleased changes yet.
+- Added documented stability gates for the current public line:
+  - `npm run test:core-workflows`
+  - `npm run test:stability`
+- Added a documented cold-start validation baseline for the GitHub main branch.
+- Expanded publish-account settings coverage so the configuration surface now matches the publish platforms already supported by the queue and dispatch layer.
 
 ## v1.1.1 - 2026-03-22
 

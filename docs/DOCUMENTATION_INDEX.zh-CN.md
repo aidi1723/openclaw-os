@@ -15,6 +15,7 @@
 
 - [Early Access 对外分发说明](EARLY_ACCESS_RELEASE.zh-CN.md)
 - [命令行安装说明](COMMAND_LINE_INSTALL.zh-CN.md)
+- [冷启动安装验收](COLD_START_VALIDATION.zh-CN.md)
 - [GitHub / CNB 发布正文（中文）](releases/v1.1.1-github-release.zh-CN.md)
 
 ## 其他核心文档

@@ -80,6 +80,26 @@ npm run dev
 如果你要进一步验证桌面壳或本地 sidecar，请看：
 
 - [命令行安装说明](docs/COMMAND_LINE_INSTALL.zh-CN.md)
+- [冷启动安装验收](docs/COLD_START_VALIDATION.zh-CN.md)
+
+### 当前已验证基线
+
+截至 `2026-03-23`，GitHub 主仓库 `d6f6a37` 已完成一轮真实冷启动验收。
+
+当前已经验证通过的主线是：
+
+- 命令行安装
+- 从源码运行
+- 浏览器模式
+- `desktop_light` 主线
+
+当前推荐的最小稳定性门禁命令：
+
+```bash
+npm install
+npm run test:stability
+npm run dev
+```
 
 ## 核心能力概览
 
@@ -107,6 +127,7 @@ npm run dev
 ### 安装与发布相关
 
 - [命令行安装说明](docs/COMMAND_LINE_INSTALL.zh-CN.md)
+- [冷启动安装验收](docs/COLD_START_VALIDATION.zh-CN.md)
 - [公开发布说明（中文）](docs/PUBLIC_RELEASE.zh-CN.md)
 
 ### 其他核心文档
@@ -126,6 +147,8 @@ npm run dev
 - `npm run build`：生产构建
 - `npm run start`：启动生产服务
 - `npm run stable`：清理重建并启动稳定版本
+- `npm run test:core-workflows`：运行销售 / 客服 / 知识资产 / 发布队列核心回归
+- `npm run test:stability`：运行核心回归 + lint + build 的稳定性门禁
 - `npm run lint`：运行 lint
 - `npm run webhook:dev`：启动本地 webhook connector 示例
 - `npm run publish-queue:worker`：运行后台发布队列 worker

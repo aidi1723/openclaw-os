@@ -24,7 +24,21 @@
 - 中文版本说明：`docs/releases/v1.1.1.zh-CN.md`
 - GitHub / CNB 发布正文：`docs/releases/v1.1.1-github-release.zh-CN.md`
 - 当前推荐安装方式：`docs/COMMAND_LINE_INSTALL.zh-CN.md`
+- 冷启动安装验收：`docs/COLD_START_VALIDATION.zh-CN.md`
 - README 与安装说明都应围绕此版本展开
+
+当前已经明确验收通过的主线为：
+
+- 命令行安装
+- 从源码运行
+- 浏览器模式
+- `desktop_light`
+
+当前不建议把以下内容一起打包宣传为“默认稳定能力”：
+
+- `desktop_dify`
+- Docker 依赖路径
+- DMG / EXE 安装包分发
 
 ## 分发建议
 

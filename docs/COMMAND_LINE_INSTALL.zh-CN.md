@@ -35,15 +35,36 @@ npm run start
 
 ```bash
 npm run dev
+npm run test:stability
 npm run build
 npm run start
 npm run lint
 ```
 
+## 推荐验收顺序
+
+如果你希望确认当前仓库在你的机器上确实稳定可用，建议按这个顺序执行：
+
+```bash
+npm install
+npm run test:stability
+npm run dev
+```
+
+`npm run test:stability` 当前会覆盖：
+
+- 销售链路回归
+- 客服链路回归
+- Knowledge Vault 复用保护检查
+- 发布队列回归
+- lint
+- build
+
 如需更多环境准备与分轨说明，请结合阅读：
 
 - [README.md](../README.md)
 - [当前版本发布说明](releases/v1.1.1.zh-CN.md)
+- [冷启动安装验收](COLD_START_VALIDATION.zh-CN.md)
 - [GETTING_STARTED.md](GETTING_STARTED.md)
 - [CONFIGURATION.md](CONFIGURATION.md)
 - [TROUBLESHOOTING.md](TROUBLESHOOTING.md)
