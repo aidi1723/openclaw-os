@@ -36,6 +36,7 @@ import {
   type PlaybookAction,
   createPlaybook,
 } from "@/lib/playbooks";
+import { addRuntimeEventListener, RuntimeEventNames } from "@/lib/runtime-events";
 import { defaultSettings, loadSettings, type InterfaceLanguage } from "@/lib/settings";
 import { requestOpenApp } from "@/lib/ui-events";
 
@@ -199,11 +200,11 @@ export function SoloOpsAppWindow({
       if (e.key && e.key.startsWith("openclaw.playbooks")) refreshPlaybooks();
       syncLanguage();
     };
-    window.addEventListener("openclaw:settings", syncLanguage);
+    const removeSettingsListener = addRuntimeEventListener(RuntimeEventNames.settings, syncLanguage);
     window.addEventListener("storage", onStorage);
     return () => {
       unsub();
-      window.removeEventListener("openclaw:settings", syncLanguage);
+      removeSettingsListener();
       window.removeEventListener("storage", onStorage);
     };
   }, [refreshPlaybooks]);
@@ -264,10 +265,10 @@ export function SoloOpsAppWindow({
         title: displayLanguage === "en" ? "Industry Bundles" : displayLanguage === "ja" ? "業界バンドル" : "行业应用组合",
         desc:
           displayLanguage === "en"
-            ? "Open an industry-curated workspace built from mature OpenClaw use cases."
+            ? "Open an industry-curated workspace built from mature workflow patterns."
             : displayLanguage === "ja"
               ? "成熟した OpenClaw 活用例をもとにした業界別ワークスペースを開きます。"
-              : "打开按行业整理好的成熟 OpenClaw 落地工作台。",
+              : "打开按行业整理好的成熟工作流工作台。",
         icon: <BriefcaseBusiness className="h-4 w-4 text-sky-600" />,
         actions: [
           { type: "open_app", appId: "industry_hub", label: displayLanguage === "en" ? "Open Industry App Center" : displayLanguage === "ja" ? "業界アプリセンターを開く" : "打开行业应用中心" },

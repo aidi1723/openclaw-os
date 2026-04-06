@@ -181,7 +181,6 @@ export function SupportCopilotAppWindow({
     const scenario = getSupportWorkflowScenario();
     if (!scenario) return null;
     const runId = startWorkflowRun(scenario, resolvedTriggerType);
-    advanceWorkflowRun(runId);
     patchSelected({
       workflowRunId: runId,
       workflowScenarioId: scenario.id,
@@ -208,6 +207,12 @@ export function SupportCopilotAppWindow({
       return;
     }
     const runId = ensureWorkflowForSelected();
+    if (runId) {
+      const run = getWorkflowRun(runId);
+      if (run?.currentStageId === "capture") {
+        advanceWorkflowRun(runId);
+      }
+    }
     const fallback = buildLocalReply(selected);
     const taskId = createTask({
       name: "Assistant - Support reply",
@@ -294,7 +299,7 @@ export function SupportCopilotAppWindow({
         workflowNextStep: "建议人工检查回复后，再决定是否进入跟进。",
       });
       updateTask(taskId, { status: "error", detail: errorMessage });
-      showToast("OpenClaw 不可用，已切换本地回复", "error");
+      showToast("智能执行不可用，已切换本地回复", "error");
     } finally {
       setIsGenerating(false);
     }

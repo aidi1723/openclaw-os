@@ -286,7 +286,7 @@ export function CreatorRadarAppWindow({
         workflowNextStep: "建议人工检查后，再送入 Content Repurposer。",
       });
       updateTask(taskId, { status: "error", detail: errorMessage });
-      showToast("OpenClaw 不可用，已切换本地摘要", "error");
+      showToast("智能执行不可用，已切换本地摘要", "error");
     } finally {
       setIsGenerating(false);
     }
@@ -567,7 +567,7 @@ export function CreatorRadarAppWindow({
                 <div>
                   <div className="text-sm font-semibold text-gray-900">今日摘要</div>
                   <div className="mt-1 text-xs text-gray-500">
-                    用 OpenClaw 生成内容雷达，不可用时回退本地摘要。
+                    用智能执行生成内容雷达，不可用时回退本地摘要。
                   </div>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">

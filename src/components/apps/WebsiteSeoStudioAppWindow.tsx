@@ -171,7 +171,7 @@ export function WebsiteSeoStudioAppWindow({
       const errorMessage = err instanceof Error ? err.message : "生成失败";
       patchSelected({ blueprint: fallback });
       updateTask(taskId, { status: "error", detail: errorMessage });
-      showToast("OpenClaw 不可用，已切换本地方案", "error");
+      showToast("智能执行不可用，已切换本地方案", "error");
     } finally {
       setIsGenerating(false);
     }
@@ -309,7 +309,7 @@ export function WebsiteSeoStudioAppWindow({
                       <input
                         value={selected.brand}
                         onChange={(event) => patchSelected({ brand: event.target.value })}
-                        placeholder="如：OpenClaw Studio"
+                        placeholder="如：AgentCore Studio"
                         className="w-full rounded-2xl border border-gray-200 px-4 py-3 text-sm outline-none transition focus:border-gray-400"
                       />
                     </label>

@@ -243,7 +243,7 @@ export function EmailAssistantAppWindow({
         workflowNextStep: "建议人工检查后，再继续同步到 CRM。",
       });
       updateTask(taskId, { status: "error", detail: errorMessage });
-      showToast("OpenClaw 不可用，已切换本地草稿", "error");
+      showToast("智能执行不可用，已切换本地草稿", "error");
     } finally {
       setIsGenerating(false);
     }
@@ -346,7 +346,7 @@ export function EmailAssistantAppWindow({
             <div>
               <div className="text-lg font-bold text-gray-900">Email Assistant</div>
               <div className="mt-1 text-sm text-gray-500">
-                用于写首封、跟进、回复和重写邮件。优先调用 OpenClaw，不可用时回退本地草稿。
+                用于写首封、跟进、回复和重写邮件。优先调用智能执行，不可用时回退本地草稿。
               </div>
             </div>
             <div className="rounded-2xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs font-semibold text-gray-700">

@@ -1,5 +1,6 @@
 import type { AppId } from "@/apps/types";
 import type { AgentProfileId } from "@/lib/agent-profiles";
+import { dispatchRuntimeEvent, RuntimeEventNames } from "@/lib/runtime-events";
 import type { WorkspaceIndustryId } from "@/lib/workspace-presets";
 import { getJsonFromStorage, setJsonToStorage } from "@/lib/storage";
 
@@ -19,14 +20,35 @@ export type LlmProviderConfig = {
   model: string;
 };
 
+export type LlmRoutingStrategy =
+  | "manual"
+  | "balanced"
+  | "quality_first"
+  | "speed_first";
+
+export type LlmRoutingSettings = {
+  strategy: LlmRoutingStrategy;
+  fallbackProviderOrder: LlmProviderId[];
+  allowOpenClawFallback: boolean;
+  maxAttempts: number;
+  retryBackoffMs: number;
+};
+
 export type LlmLibrarySettings = {
   activeProvider: LlmProviderId;
   providers: Record<LlmProviderId, LlmProviderConfig>;
+  routing: LlmRoutingSettings;
 };
 
 export type AssistantSettings = {
   systemPrompt: string;
   expertProfiles: Record<AgentProfileId, { enabled: boolean }>;
+  skillRuntime: {
+    mode: "off" | "auto" | "strict";
+    memoryV2Enabled: boolean;
+    maxInstincts: number;
+    autoKnowledgeCapture: boolean;
+  };
 };
 
 export type OpenClawEngineSettings = {
@@ -115,6 +137,13 @@ export const defaultSettings: AppSettings = {
         model: "qwen-plus",
       },
     },
+    routing: {
+      strategy: "manual",
+      fallbackProviderOrder: [],
+      allowOpenClawFallback: false,
+      maxAttempts: 2,
+      retryBackoffMs: 350,
+    },
   },
   assistant: {
     systemPrompt: "",
@@ -124,6 +153,12 @@ export const defaultSettings: AppSettings = {
       support_reply_specialist: { enabled: true },
       reality_checker: { enabled: true },
       knowledge_asset_editor: { enabled: true },
+    },
+    skillRuntime: {
+      mode: "auto",
+      memoryV2Enabled: true,
+      maxInstincts: 2,
+      autoKnowledgeCapture: true,
     },
   },
   openclaw: {
@@ -205,6 +240,7 @@ const VALID_APP_IDS = new Set<AppId>([
   "knowledge_vault",
   "account_center",
   "task_manager",
+  "runtime_console",
   "openclaw_console",
   "publisher",
   "solo_ops",
@@ -218,7 +254,7 @@ function sanitizeAppIds(input: unknown) {
   const result: AppId[] = [];
   for (const value of input) {
     if (typeof value !== "string") continue;
-    const appId = value as AppId;
+    const appId = (value === "openclaw_console" ? "runtime_console" : value) as AppId;
     if (!VALID_APP_IDS.has(appId) || seen.has(appId)) continue;
     seen.add(appId);
     result.push(appId);
@@ -263,6 +299,24 @@ function mergeSettings(saved: Partial<AppSettings> | null | undefined): AppSetti
       ...defaultSettings.llm.providers,
       ...(llmFromSaved?.providers ?? {}),
     },
+    routing: {
+      ...defaultSettings.llm.routing,
+      ...(llmFromSaved?.routing ?? {}),
+      fallbackProviderOrder: Array.isArray(llmFromSaved?.routing?.fallbackProviderOrder)
+        ? (llmFromSaved?.routing?.fallbackProviderOrder.filter(
+            (item): item is LlmProviderId =>
+              typeof item === "string" && item in defaultSettings.llm.providers,
+          ) as LlmProviderId[])
+        : defaultSettings.llm.routing.fallbackProviderOrder,
+    },
+  };
+
+  llmMerged.activeProvider = "kimi";
+  llmMerged.routing = {
+    ...llmMerged.routing,
+    strategy: "manual",
+    fallbackProviderOrder: [],
+    allowOpenClawFallback: false,
   };
 
   // Back-compat: if old `kimi` exists, merge it into llm.providers.kimi
@@ -285,6 +339,10 @@ function mergeSettings(saved: Partial<AppSettings> | null | undefined): AppSetti
       expertProfiles: {
         ...defaultSettings.assistant.expertProfiles,
         ...(saved?.assistant?.expertProfiles ?? {}),
+      },
+      skillRuntime: {
+        ...defaultSettings.assistant.skillRuntime,
+        ...(saved?.assistant?.skillRuntime ?? {}),
       },
     },
     openclaw: (() => {
@@ -375,7 +433,7 @@ export function saveSettings(next: AppSettings) {
         }).catch(() => null);
       }
     }
-    window.dispatchEvent(new Event("openclaw:settings"));
+    dispatchRuntimeEvent(RuntimeEventNames.settings);
   }
 }
 
@@ -402,7 +460,7 @@ export async function hydrateSettingsFromDesktopBridge() {
     const payload = buildDesktopSettingsPayload(merged);
     window.__AGENTCORE_BOOTSTRAP_SETTINGS__ = payload;
     setJsonToStorage(SETTINGS_KEY, payload);
-    window.dispatchEvent(new Event("openclaw:settings"));
+    dispatchRuntimeEvent(RuntimeEventNames.settings);
     return merged;
   } catch {
     return null;
@@ -410,6 +468,24 @@ export async function hydrateSettingsFromDesktopBridge() {
 }
 
 export function getActiveLlmConfig(settings: AppSettings) {
-  const id = settings.llm.activeProvider;
+  const id: LlmProviderId = "kimi";
   return { id, config: settings.llm.providers[id] };
+}
+
+export function getExecutionLlmPlan(settings: AppSettings) {
+  const active: LlmProviderId = "kimi";
+
+  return {
+    primary: {
+      id: active,
+      config: settings.llm.providers[active],
+    },
+    fallbacks: [],
+    routing: {
+      ...settings.llm.routing,
+      strategy: "manual",
+      fallbackProviderOrder: [],
+      allowOpenClawFallback: false,
+    },
+  };
 }

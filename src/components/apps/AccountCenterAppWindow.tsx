@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Building2,
   Globe,
@@ -231,7 +231,7 @@ export function AccountCenterAppWindow({
   );
 
   const filtered = useMemo(
-    () => cards.filter((c) => c.category === activeCategory),
+    () => cards.filter((c) => c.category === activeCategory && c.opensSettings),
     [cards, activeCategory],
   );
 
@@ -302,7 +302,7 @@ export function AccountCenterAppWindow({
                   {categories.find((c) => c.id === activeCategory)?.name}
                 </div>
                 <div className="text-sm text-gray-500 mt-1">
-                  已接入的平台会直接跳到设置页；其余平台会明确显示为待接入。
+                  这里只保留已经接入企业授权路径的平台。
                 </div>
               </div>
               <div className="text-xs text-gray-500">

@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { mkdir, readdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import path from "node:path";
-import { runOpenClawAgent } from "@/lib/openclaw-cli";
 import { normalizeBaseUrl } from "@/lib/url-utils";
 
 export const runtime = "nodejs";
@@ -71,44 +70,6 @@ function extractJsonFromText(text: string) {
 
 function isHms(v: unknown) {
   return typeof v === "string" && /^\d{2}:\d{2}:\d{2}$/.test(v.trim());
-}
-
-async function tryPlanWithOpenClaw(prompt: string): Promise<VideoPlan | null> {
-  const message =
-    "你是视频处理参数解析器。用户会给你一段中文指令。\n" +
-    "请你只输出严格 JSON（不要代码块、不要解释），schema：\n" +
-    '{"coverTime":"HH:MM:SS","clipStartSeconds":number,"clipSeconds":number|null}\n' +
-    "规则：\n" +
-    "- coverTime 默认 00:00:10\n" +
-    "- clipStartSeconds 默认 0\n" +
-    "- 如果用户没有要求剪辑片段，clipSeconds 返回 null；否则返回秒数（整数）\n\n" +
-    `用户指令：${prompt}`;
-
-  const r = await runOpenClawAgent({
-    sessionId: "webos-video-plan",
-    message,
-    timeoutSeconds: 45,
-  });
-  if (!r.ok) return null;
-  const json = extractJsonFromText(r.text);
-  if (!json || typeof json !== "object") return null;
-
-  const coverTime = isHms((json as any).coverTime) ? String((json as any).coverTime) : undefined;
-  const clipStartSecondsRaw = (json as any).clipStartSeconds;
-  const clipSecondsRaw = (json as any).clipSeconds;
-  const clipStartSeconds =
-    typeof clipStartSecondsRaw === "number" && Number.isFinite(clipStartSecondsRaw)
-      ? Math.max(0, Math.floor(clipStartSecondsRaw))
-      : undefined;
-  const clipSeconds =
-    clipSecondsRaw === null
-      ? null
-      : typeof clipSecondsRaw === "number" && Number.isFinite(clipSecondsRaw)
-        ? Math.max(1, Math.floor(clipSecondsRaw))
-        : undefined;
-
-  if (!coverTime && clipStartSeconds === undefined && clipSeconds === undefined) return null;
-  return { coverTime, clipStartSeconds, clipSeconds };
 }
 
 function parseOutputFromUnknown(payload: any): ExecuteOutput | null {
@@ -270,6 +231,20 @@ function parseClipStartSeconds(prompt: string) {
   return 0;
 }
 
+function buildLocalVideoPlan(prompt: string): VideoPlan {
+  const coverTime = parseCoverTimestamp(prompt);
+  const clipStartSeconds = parseClipStartSeconds(prompt);
+  const clipSeconds = parseClipSeconds(prompt);
+  return {
+    coverTime: isHms(coverTime) ? coverTime : "00:00:10",
+    clipStartSeconds: Number.isFinite(clipStartSeconds) ? Math.max(0, Math.floor(clipStartSeconds)) : 0,
+    clipSeconds:
+      typeof clipSeconds === "number" && Number.isFinite(clipSeconds)
+        ? Math.max(1, Math.floor(clipSeconds))
+        : null,
+  };
+}
+
 async function localVideoFramesExecute(params: {
   prompt: string;
   fileUrl: string;
@@ -278,8 +253,8 @@ async function localVideoFramesExecute(params: {
   await mkdir(outRoot, { recursive: true });
   const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
-  const plan = await tryPlanWithOpenClaw(params.prompt);
-  let coverTime = plan?.coverTime ?? parseCoverTimestamp(params.prompt);
+  const plan = buildLocalVideoPlan(params.prompt);
+  let coverTime = plan.coverTime ?? "00:00:10";
   const coverName = `${id}-cover.png`;
   const coverPath = path.join(outRoot, coverName);
 
@@ -313,9 +288,8 @@ async function localVideoFramesExecute(params: {
   }
   const coverSrc = `data:image/png;base64,${coverBuf.toString("base64")}`;
 
-  const clipSeconds = plan?.clipSeconds ?? parseClipSeconds(params.prompt);
-  const clipStartSeconds =
-    plan?.clipStartSeconds ?? parseClipStartSeconds(params.prompt);
+  const clipSeconds = plan.clipSeconds;
+  const clipStartSeconds = plan.clipStartSeconds ?? 0;
   let videoSrc: string | null = null;
   let clipName: string | null = null;
   let clipPath: string | null = null;
@@ -384,7 +358,7 @@ async function localVideoFramesExecute(params: {
       coverPath,
       clipPath,
     },
-    note: "OpenClaw 引擎不可达，已使用本地 video-frames (ffmpeg) 完成处理",
+    note: "运行时引擎不可达，已使用本地 video-frames (ffmpeg) 完成处理",
   };
 }
 
@@ -421,7 +395,7 @@ async function callOpenClawChat(params: {
           {
             role: "system",
             content:
-              "你是 OpenClaw 引擎的 Agent 执行器。你的目标是基于用户指令，对给定视频文件调用 video-frames 能力完成：抽帧生成封面 + 产出剪辑后片段（如果需要）。" +
+              "你是运行时引擎的 Agent 执行器。你的目标是基于用户指令，对给定视频文件调用 video-frames 能力完成：抽帧生成封面 + 产出剪辑后片段（如果需要）。" +
               "请严格只返回 JSON，不要输出其它文字。JSON schema：" +
               '{"videoSrc":string|null,"coverSrc":string|null,"coverBase64":string|null}。' +
               "coverBase64 为纯 base64（不含 data: 前缀）。如果只能返回其中之一，另一个置 null。",
@@ -551,14 +525,14 @@ export async function POST(req: Request) {
             ? String((cause as any).message)
             : null;
         const message =
-          err instanceof Error ? err.message : "无法连接到 OpenClaw 引擎";
+          err instanceof Error ? err.message : "无法连接到运行时引擎";
         const fallbackMessage =
           fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
         return NextResponse.json(
           {
             ok: false,
             error:
-              `无法连接到 OpenClaw 引擎，请检查 ${engineUrl} 是否运行。` +
+              `无法连接到运行时引擎，请检查 ${engineUrl} 是否运行。` +
               (causeMessage ? `（${causeMessage}）` : message ? `（${message}）` : "") +
               `；本地 video-frames 兜底也失败：${fallbackMessage}`,
           },
@@ -573,7 +547,7 @@ export async function POST(req: Request) {
           {
             ok: false,
             error:
-              "鉴权失败：请在『设置 → 引擎核心』中填写正确的 OpenClaw API Token。",
+              "鉴权失败：请在『设置 → 引擎核心』中填写正确的运行时 API Token。",
           },
           { status: 502, headers: { "Cache-Control": "no-store" } },
         );

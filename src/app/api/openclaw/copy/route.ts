@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { runOpenClawAgent } from "@/lib/openclaw-cli";
+import { requestServerLlmText, type ServerLlmConfigInput } from "@/lib/server/direct-llm";
 
 export const runtime = "nodejs";
 
@@ -18,7 +18,7 @@ export async function POST(req: Request) {
   try {
     const body = (await req.json().catch(() => null)) as
       | null
-      | { style?: Style; topic?: string };
+      | { style?: Style; topic?: string; llm?: ServerLlmConfigInput };
 
     const style = (body?.style ?? "xiaohongshu") as Style;
     const topic = (body?.topic ?? "").trim();
@@ -26,17 +26,15 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "缺少输入内容" }, { status: 400 });
     }
 
-    const systemPrompt = systemPromptByStyle[style] ?? systemPromptByStyle.xiaohongshu;
-    const message =
-      "请根据以下系统设定生成可直接发布的文案。\n" +
-      "只输出最终文案本身，不要解释你的思考过程。\n\n" +
-      `系统设定：${systemPrompt}\n\n` +
-      `用户输入：${topic}`;
-
-    const r = await runOpenClawAgent({
-      sessionId: `webos-copy-${style}`,
-      message,
-      timeoutSeconds: 90,
+    const systemPrompt =
+      (systemPromptByStyle[style] ?? systemPromptByStyle.xiaohongshu) +
+      "\n只输出最终文案本身，不要解释你的思考过程。";
+    const r = await requestServerLlmText({
+      llm: body?.llm,
+      systemPrompt,
+      userPrompt: topic,
+      timeoutMs: 90_000,
+      temperature: 0.7,
     });
     if (!r.ok) return NextResponse.json(r, { status: 502 });
 

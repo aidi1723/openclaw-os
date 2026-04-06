@@ -1,5 +1,5 @@
-import { runOpenClawAgent } from "@/lib/openclaw-cli";
 import type { MatrixAccountsSettings } from "@/lib/settings";
+import { requestServerLlmText, type ServerLlmConfigInput } from "@/lib/server/direct-llm";
 
 export type DispatchPlatform =
   | "xiaohongshu"
@@ -146,6 +146,7 @@ export async function runPublishDispatch(params: {
   dryRun: boolean;
   connections: Partial<MatrixAccountsSettings> | Record<string, { token?: string; webhookUrl?: string }>;
   timeoutSeconds?: number;
+  llm?: ServerLlmConfigInput | null;
 }) {
   const title = params.title.trim();
   const content = params.body.trim();
@@ -165,7 +166,7 @@ export async function runPublishDispatch(params: {
       : 50;
 
   const checklist = platforms.map((platform, idx) => `${idx + 1}. ${platformHint(platform)}`).join("\n");
-  const openclawMessage =
+  const plannerPrompt =
     "你是社媒发布助手。用户给你一份『原始内容』与『目标平台列表』。\n" +
     "你的任务：为每个平台生成可直接发布的版本，并给出检查清单。\n" +
     "要求：只输出严格 JSON（不要代码块、不要解释）。\n" +
@@ -181,16 +182,23 @@ export async function runPublishDispatch(params: {
     "平台偏好提示：\n" +
     checklist;
 
-  const openclaw =
+  const planner =
     params.timeoutSeconds === 0
-      ? ({ ok: false, error: "OpenClaw skipped", raw: null } as const)
-      : await runOpenClawAgent({
-          sessionId: `webos-publish-${dryRun ? "dry" : "dispatch"}`,
-          message: openclawMessage,
-          timeoutSeconds,
-        });
+      ? ({ ok: false as const, error: "planner skipped", source: "deterministic_fallback" as const, raw: null })
+      : await (async () => {
+          const result = await requestServerLlmText({
+            llm: params.llm,
+            userPrompt: plannerPrompt,
+            timeoutMs: timeoutSeconds * 1000,
+            temperature: 0.4,
+          });
+          return {
+            ...result,
+            source: result.ok ? ("kimi" as const) : ("deterministic_fallback" as const),
+          };
+        })();
 
-  const variantsText = openclaw.ok ? openclaw.text : "";
+  const variantsText = planner.ok ? planner.text : "";
   let variantsJson: any = null;
   try {
     variantsJson = variantsText ? JSON.parse(variantsText) : null;
@@ -224,7 +232,16 @@ export async function runPublishDispatch(params: {
     "说明：若配置了平台 Webhook，将触发自动发布；否则返回手动发布清单。";
 
   if (dryRun) {
-    return { ok: true as const, mode: "dry-run" as const, dryRun, platforms, actions, text, variants, openclaw };
+    return {
+      ok: true as const,
+      mode: "dry-run" as const,
+      dryRun,
+      platforms,
+      actions,
+      text,
+      variants,
+      planner,
+    };
   }
 
   const results: Array<{
@@ -319,6 +336,6 @@ export async function runPublishDispatch(params: {
     text,
     variants,
     results,
-    openclaw,
+    planner,
   };
 }

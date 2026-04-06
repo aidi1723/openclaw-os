@@ -18,6 +18,7 @@ import {
   subscribePlaybooks,
   type PlaybookAction,
 } from "@/lib/playbooks";
+import { addRuntimeEventListener, RuntimeEventNames } from "@/lib/runtime-events";
 import { sourceUseCaseIndustries } from "@/lib/openclaw-usecase-map";
 import { defaultSettings, loadSettings, type InterfaceLanguage } from "@/lib/settings";
 import { requestOpenApp } from "@/lib/ui-events";
@@ -1107,11 +1108,11 @@ export function SolutionsHubAppWindow({
       if (e.key.startsWith("openclaw.playbooks")) refresh();
       syncLanguage();
     };
-    window.addEventListener("openclaw:settings", syncLanguage);
+    const removeSettingsListener = addRuntimeEventListener(RuntimeEventNames.settings, syncLanguage);
     window.addEventListener("storage", onStorage);
     return () => {
       unsub();
-      window.removeEventListener("openclaw:settings", syncLanguage);
+      removeSettingsListener();
       window.removeEventListener("storage", onStorage);
     };
   }, [isVisible]);

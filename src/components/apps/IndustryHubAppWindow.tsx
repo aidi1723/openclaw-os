@@ -25,6 +25,7 @@ import {
   mapIndustryToWorkspaceIndustry,
   type IndustryId,
 } from "@/lib/industry-solutions";
+import { addRuntimeEventListener, RuntimeEventNames } from "@/lib/runtime-events";
 import type { PlaybookAction } from "@/lib/playbooks";
 import { defaultSettings, loadSettings, saveSettings, type InterfaceLanguage } from "@/lib/settings";
 import { requestOpenApp } from "@/lib/ui-events";
@@ -39,11 +40,7 @@ import {
   type WorkspaceRoleId,
 } from "@/lib/workspace-presets";
 import {
-  advanceWorkflowRun,
-  completeWorkflowRun,
-  failWorkflowRun,
   getWorkflowRuns,
-  setWorkflowRunAwaitingHuman,
   startWorkflowRun,
   subscribeWorkflowRuns,
 } from "@/lib/workflow-runs";
@@ -120,7 +117,7 @@ function getCopy(language: InterfaceLanguage): CopySet {
     return {
       title: "Industry App Center",
       subtitle:
-        "Package mature OpenClaw use cases into ready-to-run industry workbenches and apply them directly to your desktop.",
+        "Package mature workflow patterns into ready-to-run industry workbenches and apply them directly to your desktop.",
       applyWorkspace: "Apply to Workspace",
       openCore: "Open Core Apps",
       launchDesk: "Launch Industry Desk",
@@ -259,7 +256,7 @@ function getCopy(language: InterfaceLanguage): CopySet {
   return {
     title: "行业应用中心",
     subtitle:
-      "把 awesome-openclaw-usecases 里成熟的落地场景，按行业打包成可直接使用的工作台和 app 组合。",
+      "把成熟的落地场景按行业打包成可直接使用的工作台和 app 组合。",
     applyWorkspace: "应用到工作台",
     openCore: "打开核心应用",
     launchDesk: "启动行业桌面",
@@ -468,10 +465,10 @@ export function IndustryHubAppWindow({
   useEffect(() => {
     const sync = () => setInterfaceLanguage(loadSettings().personalization.interfaceLanguage);
     sync();
-    window.addEventListener("openclaw:settings", sync);
+    const removeSettingsListener = addRuntimeEventListener(RuntimeEventNames.settings, sync);
     window.addEventListener("storage", sync);
     return () => {
-      window.removeEventListener("openclaw:settings", sync);
+      removeSettingsListener();
       window.removeEventListener("storage", sync);
     };
   }, []);
@@ -1069,39 +1066,8 @@ export function IndustryHubAppWindow({
                           当前运行流：{selectedWorkflowRun.scenarioTitle} · trigger {selectedWorkflowRun.triggerType}
                         </div>
                       </div>
-                      <div className="flex flex-wrap gap-2">
-                        <button
-                          type="button"
-                          onClick={() => advanceWorkflowRun(selectedWorkflowRun.id)}
-                          className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-blue-700"
-                        >
-                          <PlayCircle className="h-4 w-4" />
-                          {copy.advanceWorkflow}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setWorkflowRunAwaitingHuman(selectedWorkflowRun.id)}
-                          className="inline-flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700 transition-colors hover:bg-amber-100"
-                        >
-                          <UserRound className="h-4 w-4" />
-                          {copy.holdForReview}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => completeWorkflowRun(selectedWorkflowRun.id)}
-                          className="inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700 transition-colors hover:bg-emerald-100"
-                        >
-                          <CheckCircle2 className="h-4 w-4" />
-                          {copy.completeWorkflow}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => failWorkflowRun(selectedWorkflowRun.id)}
-                          className="inline-flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700 transition-colors hover:bg-red-100"
-                        >
-                          <BriefcaseBusiness className="h-4 w-4" />
-                          {copy.failWorkflow}
-                        </button>
+                      <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs font-semibold text-gray-600">
+                        当前阶段由业务应用执行结果驱动，这里仅展示状态
                       </div>
                     </div>
                   </div>

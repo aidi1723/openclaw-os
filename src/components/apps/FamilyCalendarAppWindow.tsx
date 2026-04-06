@@ -148,7 +148,7 @@ export function FamilyCalendarAppWindow({
       const errorMessage = err instanceof Error ? err.message : "生成失败";
       setPlan(fallback);
       updateTask(taskId, { status: "error", detail: errorMessage });
-      showToast("OpenClaw 不可用，已切换本地计划", "error");
+      showToast("智能执行不可用，已切换本地计划", "error");
     } finally {
       setIsGenerating(false);
     }

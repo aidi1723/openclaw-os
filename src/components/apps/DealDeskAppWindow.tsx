@@ -380,7 +380,7 @@ export function DealDeskAppWindow({
         workflowNextStep: "建议检查判断内容后，再把线索送入邮件跟进阶段。",
       });
       updateTask(taskId, { status: "error", detail: errorMessage });
-      showToast("OpenClaw 不可用，已切换本地简报", "error");
+      showToast("智能执行不可用，已切换本地简报", "error");
     } finally {
       setIsGenerating(false);
     }

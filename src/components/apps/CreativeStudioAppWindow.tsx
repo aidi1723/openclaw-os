@@ -116,7 +116,7 @@ export function CreativeStudioAppWindow({
       form.append("engineUrl", engineUrl);
       form.append("token", token);
 
-      const res = await fetch(buildAgentCoreApiUrl("/api/openclaw/execute"), {
+      const res = await fetch(buildAgentCoreApiUrl("/api/creative-studio/process"), {
         method: "POST",
         body: form,
         signal: controller.signal,
@@ -136,7 +136,7 @@ export function CreativeStudioAppWindow({
         const message =
           data?.error ||
           (engineUrl
-            ? `无法连接到 OpenClaw 引擎，请检查 ${engineUrl} 是否运行`
+            ? `无法连接到运行时引擎，请检查 ${engineUrl} 是否运行`
             : "执行失败：本地 video-frames 处理未能完成");
         if (runId !== runIdRef.current || !mountedRef.current) return;
         showToast(message, "error");
@@ -181,7 +181,7 @@ export function CreativeStudioAppWindow({
       }
       if (runId !== runIdRef.current || !mountedRef.current) return;
       setOutput({ videoSrc: null, coverSrc: null });
-      const message = `无法连接到 OpenClaw 引擎，请检查 ${engineUrl} 是否运行`;
+      const message = `无法连接到运行时引擎，请检查 ${engineUrl} 是否运行`;
       showToast(message, "error");
       if (taskIdRef.current) {
         updateTask(taskIdRef.current, { status: "error", detail: message });
@@ -302,7 +302,7 @@ export function CreativeStudioAppWindow({
             </button>
 
             <div className="text-xs text-gray-500 leading-relaxed">
-              提示：该 App 只负责“指令交互”。后端可接 OpenClaw 的{" "}
+              提示：该 App 只负责“指令交互”。后端可接运行时引擎的{" "}
               <span className="font-semibold text-gray-700">video-frames</span>{" "}
               技能返回封面图或视频片段。
             </div>

@@ -1367,6 +1367,58 @@ async function runServerBackedRetryRegression(localStorage) {
   console.log("server backed retry regression passed");
 }
 
+async function runExecutionRoutingPlanRegression() {
+  logSection("execution routing plan");
+  const settingsLib = await import(moduleUrl("src/lib/settings.ts"));
+
+  const settings = {
+    ...settingsLib.defaultSettings,
+    llm: {
+      ...settingsLib.defaultSettings.llm,
+      activeProvider: "openai",
+      providers: {
+        ...settingsLib.defaultSettings.llm.providers,
+        openai: {
+          apiKey: "openai-key",
+          baseUrl: "https://api.openai.com/v1",
+          model: "gpt-4o-mini",
+        },
+        anthropic: {
+          apiKey: "anthropic-key",
+          baseUrl: "https://api.anthropic.com",
+          model: "claude-3-5-sonnet-latest",
+        },
+        deepseek: {
+          apiKey: "deepseek-key",
+          baseUrl: "https://api.deepseek.com",
+          model: "deepseek-chat",
+        },
+        kimi: {
+          apiKey: "kimi-key",
+          baseUrl: "https://api.moonshot.cn/v1",
+          model: "moonshot-v1-8k",
+        },
+        qwen: {
+          apiKey: "",
+          baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+          model: "qwen-plus",
+        },
+      },
+      routing: {
+        ...settingsLib.defaultSettings.llm.routing,
+        strategy: "quality_first",
+        fallbackProviderOrder: ["deepseek", "anthropic", "kimi", "qwen", "openai"],
+      },
+    },
+  };
+
+  const plan = settingsLib.getExecutionLlmPlan(settings);
+  assert.equal(plan.primary.id, "kimi", "Execution plan should pin Kimi as the primary provider.");
+  assert.deepEqual(plan.fallbacks.map((item) => item.id), [], "Kimi-only routing should not emit fallback providers.");
+
+  console.log("execution routing plan regression passed");
+}
+
 async function runAgentExecutorRegression(localStorage) {
   logSection("agent executor core");
   resetBrowserState(localStorage);
@@ -1375,10 +1427,23 @@ async function runAgentExecutorRegression(localStorage) {
   const originalFetch = globalThis.fetch;
   let capturedUrl = "";
   let capturedPayload = null;
+  let attemptCount = 0;
 
   globalThis.fetch = async (input, init) => {
+    attemptCount += 1;
     capturedUrl = typeof input === "string" ? input : String(input?.url ?? "");
     capturedPayload = init?.body ? JSON.parse(String(init.body)) : null;
+    if (attemptCount === 1) {
+      return new Response(
+        JSON.stringify({
+          error: { message: "temporary upstream failure" },
+        }),
+        {
+          status: 503,
+          headers: { "Content-Type": "application/json" },
+        },
+      );
+    }
     return new Response(
       JSON.stringify({
         choices: [{ message: { content: "executor-ok" } }],
@@ -1408,11 +1473,17 @@ async function runAgentExecutorRegression(localStorage) {
         baseUrl: "https://api.openai.com/v1",
         model: "gpt-4o-mini",
       },
+      maxAttempts: 2,
+      retryBackoffMs: 0,
     });
 
     assert.equal(payload.ok, true, "Executor should succeed with direct model config.");
     assert.equal(payload.text, "executor-ok", "Executor should surface model output.");
     assert.equal(payload.engine, "agentcore_executor", "Executor should use the internal model adapter when llm config is present.");
+    assert.equal(payload.trace.attemptCount, 2, "Executor should expose retry attempts in trace.");
+    assert.equal(payload.trace.attempts[0]?.success, false, "First attempt should record the upstream failure.");
+    assert.equal(payload.trace.attempts[1]?.success, true, "Second attempt should record the retry success.");
+    assert.match(payload.trace.requestId, /^exec-/, "Executor should generate a stable request id.");
     assert.equal(
       capturedUrl,
       "https://api.openai.com/v1/chat/completions",
@@ -1436,6 +1507,233 @@ async function runAgentExecutorRegression(localStorage) {
   console.log("agent executor regression passed");
 }
 
+async function runSkillRuntimeAndMemoryRegression() {
+  logSection("skill runtime + memory v2");
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), "agentcore-skill-memory-"));
+  const previousCwd = process.cwd();
+  process.chdir(tempRoot);
+
+  const originalFetch = globalThis.fetch;
+  const capturedSystemPrompts = [];
+  globalThis.fetch = async (_input, init) => {
+    const payload = init?.body ? JSON.parse(String(init.body)) : null;
+    capturedSystemPrompts.push(payload?.messages?.[0]?.content ?? payload?.system ?? "");
+    return new Response(
+      JSON.stringify({
+        choices: [{ message: { content: "We can ship a replacement hinge within 48 hours." } }],
+      }),
+      {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      },
+    );
+  };
+
+  try {
+    const runner = await import(moduleUrl("src/lib/server/executor-runner.ts"));
+    const sessionStore = await import(moduleUrl("src/lib/server/executor-session-store.ts"));
+    const instinctRoute = await import(
+      moduleUrl("src/app/api/runtime/executor/memory/instincts/route.ts")
+    );
+
+    const first = await runner.executeAgentCoreTask({
+      source: "regression/skill-memory",
+      message: "请为 damaged hinge case 生成一段客服回复",
+      sessionId: "regression-skill-memory",
+      timeoutSeconds: 20,
+      systemPrompt: "You are a support reviewer.",
+      useSkills: true,
+      skillProfileId: "support_reply_specialist",
+      enableMemoryV2: true,
+      memoryScope: "support:damaged-hinge",
+      taskLabel: "support-reply",
+      maxAttempts: 1,
+      retryBackoffMs: 0,
+      llm: {
+        provider: "openai",
+        apiKey: "test-key",
+        baseUrl: "https://api.openai.com/v1",
+        model: "gpt-4o-mini",
+      },
+    });
+
+    const second = await runner.executeAgentCoreTask({
+      source: "regression/skill-memory",
+      message: "请再次为 damaged hinge case 生成一段客服回复",
+      sessionId: "regression-skill-memory",
+      timeoutSeconds: 20,
+      systemPrompt: "You are a support reviewer.",
+      useSkills: true,
+      skillProfileId: "support_reply_specialist",
+      enableMemoryV2: true,
+      memoryScope: "support:damaged-hinge",
+      taskLabel: "support-reply",
+      maxAttempts: 1,
+      retryBackoffMs: 0,
+      llm: {
+        provider: "openai",
+        apiKey: "test-key",
+        baseUrl: "https://api.openai.com/v1",
+        model: "gpt-4o-mini",
+      },
+    });
+
+    assert.equal(first.ok, true, "First skill runtime execution should succeed.");
+    assert.equal(second.ok, true, "Second skill runtime execution should succeed.");
+    assert.equal(
+      second.trace.memory?.recalledInstincts >= 1,
+      true,
+      "Second execution should recall at least one distilled instinct.",
+    );
+    assert.equal(
+      second.trace.skillPlan?.selectedSkillIds.includes("support_reply"),
+      true,
+      "Skill planner should choose the support reply skill.",
+    );
+    assert.equal(
+      second.trace.skillReceipts.some((receipt) => receipt.skillId === "knowledge_capture"),
+      true,
+      "Skill receipts should include post-run knowledge capture.",
+    );
+    assert.match(
+      capturedSystemPrompts[capturedSystemPrompts.length - 1] ?? "",
+      /Operational instincts for scope support:damaged-hinge/,
+      "Second execution should inject Memory V2 recall into the system prompt.",
+    );
+
+    const session = await sessionStore.getExecutorSession("regression-skill-memory");
+    assert.equal(session?.turns.length, 2, "Session store should keep both skill runtime turns.");
+    assert.equal(
+      session?.turns[1]?.skillReceipts?.length >= 2,
+      true,
+      "Persisted session turns should include skill receipts.",
+    );
+
+    const routeResponse = await instinctRoute.GET(
+      new Request(
+        "http://localhost/api/runtime/executor/memory/instincts?scope=support%3Adamaged-hinge&profileId=support_reply_specialist&limit=2",
+      ),
+    );
+    const routePayload = await routeResponse.json();
+    assert.equal(routeResponse.status, 200, "Instinct route should succeed.");
+    assert.equal(
+      routePayload.data?.instincts?.length >= 1,
+      true,
+      "Instinct route should expose stored Memory V2 entries.",
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+    process.chdir(previousCwd);
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+
+  console.log("skill runtime + memory v2 regression passed");
+}
+
+async function runAgentExecutorFallbackHealthRegression() {
+  logSection("executor fallback health");
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), "agentcore-executor-audit-"));
+  const previousCwd = process.cwd();
+  process.chdir(tempRoot);
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (_input, init) => {
+    const payload = init?.body ? JSON.parse(String(init.body)) : null;
+    if (payload?.model === "gpt-4o-mini") {
+      return new Response(
+        JSON.stringify({
+          error: { message: "primary unavailable" },
+        }),
+        {
+          status: 502,
+          headers: { "Content-Type": "application/json" },
+        },
+      );
+    }
+
+    if (payload?.model === "gpt-4o-mini-backup") {
+      return new Response(
+        JSON.stringify({
+          choices: [{ message: { content: "fallback-ok" } }],
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        },
+      );
+    }
+
+    throw new Error(`unexpected model request: ${payload?.model ?? "unknown"}`);
+  };
+
+  try {
+    const runner = await import(moduleUrl("src/lib/server/executor-runner.ts"));
+    const healthRoute = await import(moduleUrl("src/app/api/runtime/executor/health/route.ts"));
+
+    const result = await runner.executeAgentCoreTask({
+      source: "regression/executor-fallback-health",
+      message: "请给出一段稳健的跟进建议",
+      sessionId: "regression-fallback-session",
+      timeoutSeconds: 15,
+      systemPrompt: "You are a resilient workflow copilot.",
+      useSkills: true,
+      maxAttempts: 1,
+      retryBackoffMs: 0,
+      allowFallbackToOpenClaw: false,
+      llm: {
+        provider: "openai",
+        apiKey: "primary-key",
+        baseUrl: "https://api.openai.com/v1",
+        model: "gpt-4o-mini",
+      },
+      fallbackLlm: [
+        {
+          provider: "openai",
+          apiKey: "backup-key",
+          baseUrl: "https://api.openai.com/v1",
+          model: "gpt-4o-mini-backup",
+        },
+      ],
+    });
+
+    assert.equal(result.ok, true, "Fallback model should recover the execution.");
+    assert.equal(result.text, "fallback-ok", "Fallback model output should be surfaced.");
+    assert.equal(result.trace.fallbackUsed, true, "Trace should mark fallback routing.");
+    assert.equal(result.trace.attemptCount, 2, "Trace should include primary + fallback attempts.");
+    assert.equal(
+      result.trace.attempts[0]?.candidateKind,
+      "primary",
+      "First attempt should belong to the primary candidate.",
+    );
+    assert.equal(
+      result.trace.attempts[1]?.candidateKind,
+      "fallback",
+      "Second attempt should belong to the fallback candidate.",
+    );
+
+    const response = await healthRoute.GET();
+    const payload = await response.json();
+    assert.equal(response.status, 200, "Executor health route should succeed.");
+    assert.equal(payload.ok, true, "Executor health route should return ok=true.");
+    assert.equal(
+      payload.data?.overview?.totals?.fallback,
+      1,
+      "Health overview should count fallback executions.",
+    );
+    assert.equal(
+      payload.data?.overview?.recent24h?.runs,
+      1,
+      "Health overview should include the recorded execution.",
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+    process.chdir(previousCwd);
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+
+  console.log("executor fallback health regression passed");
+}
+
 async function runExecutorSessionStoreRegression() {
   logSection("executor session store");
   const tempRoot = await mkdtemp(path.join(os.tmpdir(), "agentcore-executor-session-"));
@@ -1446,7 +1744,13 @@ async function runExecutorSessionStoreRegression() {
   globalThis.fetch = async () =>
     new Response(
       JSON.stringify({
-        choices: [{ message: { content: "session-store-ok" } }],
+        choices: [
+          {
+            message: {
+              content: "session-store-ok Authorization=Bearer secret-token sk-proj-secret",
+            },
+          },
+        ],
       }),
       {
         status: 200,
@@ -1460,14 +1764,15 @@ async function runExecutorSessionStoreRegression() {
 
     const result = await runner.executeAgentCoreTask({
       source: "regression/executor-session",
-      message: "请总结这个客户的下一步动作",
+      message: "请总结这个客户的下一步动作 token=abc123",
       sessionId: "regression-session-store",
       timeoutSeconds: 20,
-      systemPrompt: "You are a disciplined sales reviewer.",
+      systemPrompt: "You are a disciplined sales reviewer. apiKey=super-secret-key",
       useSkills: true,
       workspaceContext: {
         activeIndustry: "doors_windows",
         activeScenarioId: "sales-followup",
+        connectorToken: "token-should-redact",
       },
       llm: {
         provider: "openai",
@@ -1499,9 +1804,34 @@ async function runExecutorSessionStoreRegression() {
       "Persisted turn should include the model output.",
     );
     assert.equal(
+      session.turns[0]?.requestId.startsWith("exec-"),
+      true,
+      "Persisted turn should keep the generated request id.",
+    );
+    assert.equal(
+      session.turns[0]?.attemptCount,
+      1,
+      "Persisted turn should include attempt counts.",
+    );
+    assert.equal(
+      session.turns[0]?.skillReceipts?.some((receipt) => receipt.skillId === "knowledge_capture"),
+      true,
+      "Persisted turn should keep skill receipts.",
+    );
+    assert.equal(
       "apiKey" in (session.turns[0] ?? {}),
       false,
       "Executor session persistence must not store API keys.",
+    );
+    assert.equal(
+      /super-secret-key|secret-token|abc123/.test(JSON.stringify(session.turns[0] ?? {})),
+      false,
+      "Executor session persistence must redact sensitive values.",
+    );
+    assert.match(
+      JSON.stringify(session.turns[0] ?? {}),
+      /\[REDACTED\]/,
+      "Executor session persistence should replace secret-looking values with redaction markers.",
     );
   } finally {
     globalThis.fetch = originalFetch;
@@ -3048,7 +3378,10 @@ async function main() {
   await runRequestBodyGuardRegression();
   await runTaskWorkflowMetadataRegression(localStorage);
   await runServerBackedRetryRegression(localStorage);
+  await runExecutionRoutingPlanRegression();
   await runAgentExecutorRegression(localStorage);
+  await runSkillRuntimeAndMemoryRegression();
+  await runAgentExecutorFallbackHealthRegression();
   await runExecutorSessionStoreRegression();
   await runCoreStateServerSyncRegression(localStorage);
   await runWorkflowRunStoreRegression();

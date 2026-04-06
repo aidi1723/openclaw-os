@@ -31,6 +31,7 @@
 
 ## 内部工程与学习
 
+- [企业级执行层升级方案](AGENT_EXECUTION_ENTERPRISE_UPGRADE.zh-CN.md)
 - [团队 Memo：如何看待 build-your-own-x](TEAM_MEMO_BUILD_YOUR_OWN_X.zh-CN.md)
 - [工程学习地图](ENGINEERING_LEARNING_MAP.zh-CN.md)
 - [技术学习优先级表](TECH_LEARNING_PRIORITY_TABLE.zh-CN.md)

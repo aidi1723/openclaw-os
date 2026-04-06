@@ -7,6 +7,7 @@ import type { ProjectHealth } from "@/lib/project-ops";
 import type { RecruitingStage } from "@/lib/recruiting";
 import type { CreatorWorkflowMeta } from "@/lib/creator-workflow";
 import type { SalesWorkflowMeta } from "@/lib/sales-workflow";
+import { dispatchRuntimeEvent, normalizeRuntimeAppId, RuntimeEventNames } from "@/lib/runtime-events";
 import type { LlmProviderId } from "@/lib/settings";
 import type { SupportChannel, SupportStatus } from "@/lib/support";
 import type { WorkflowContextMeta } from "@/lib/workflow-context";
@@ -143,11 +144,10 @@ export function requestOpenApp(
   options?: Omit<OpenAppDetail, "appId">,
 ) {
   if (typeof window === "undefined") return;
-  window.dispatchEvent(
-    new CustomEvent<OpenAppDetail>("openclaw:open-app", {
-      detail: { appId, ...options },
-    }),
-  );
+  dispatchRuntimeEvent(RuntimeEventNames.openApp, {
+    appId: normalizeRuntimeAppId(appId),
+    ...options,
+  } satisfies OpenAppDetail);
 }
 
 export function requestOpenSettings(settingsTab: SettingsTargetTab) {

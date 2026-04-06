@@ -49,7 +49,8 @@ const appNames: Record<AppId, CopySet> = {
   knowledge_vault: { zh: "知识库", en: "Knowledge Vault", ja: "ナレッジボールト" },
   account_center: { zh: "授权中心", en: "Account Center", ja: "アカウントセンター" },
   task_manager: { zh: "任务中心", en: "Task Manager", ja: "タスクマネージャー" },
-  openclaw_console: { zh: "OpenClaw 控制台", en: "OpenClaw Console", ja: "OpenClawコンソール" },
+  runtime_console: { zh: "运行时控制台", en: "Runtime Console", ja: "ランタイムコンソール" },
+  openclaw_console: { zh: "运行时控制台", en: "Runtime Console", ja: "ランタイムコンソール" },
   publisher: { zh: "发布中心", en: "Publisher", ja: "パブリッシャー" },
   solo_ops: { zh: "SoloOps 作战台", en: "SoloOps", ja: "SoloOps" },
   solutions_hub: { zh: "方案库", en: "Solutions Hub", ja: "ソリューションハブ" },
@@ -117,7 +118,7 @@ export const appCatalog: Array<{ id: AppId; category: AppCategory }> = [
   { id: "health_tracker", category: "personal" },
   { id: "second_brain", category: "personal" },
   { id: "account_center", category: "system" },
-  { id: "openclaw_console", category: "system" },
+  { id: "runtime_console", category: "system" },
   { id: "settings", category: "system" },
 ];
 

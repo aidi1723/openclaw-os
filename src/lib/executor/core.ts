@@ -1,15 +1,36 @@
-import { runOpenClawAgent, type OpenClawAgentResult } from "@/lib/openclaw-cli";
-import { normalizeBaseUrl } from "@/lib/url-utils";
 import {
-  type AgentCoreExecutorLlmConfig,
   type AgentCoreLegacyTaskRequest,
   type AgentCoreTaskRequest,
   type AgentCoreTaskTrace,
+  type AgentCoreTaskTraceAttempt,
   normalizeAgentCoreTaskRequest,
 } from "@/lib/executor/contracts";
+import {
+  buildExecutionCandidates,
+  normalizeExecutionPolicy,
+  type ResolvedAgentCoreLlmConfig,
+} from "@/lib/executor/policy";
+import { buildSkillPlan } from "@/lib/executor/skills/planner";
+import {
+  runPostExecutionSkills,
+  runPreExecutionSkills,
+} from "@/lib/executor/skills/runtime";
+import { normalizeBaseUrl } from "@/lib/url-utils";
 
-export type AgentCoreTaskResult = OpenClawAgentResult & {
-  engine: "agentcore_executor" | "openclaw_cli_fallback";
+type AgentCoreTaskOk = {
+  ok: true;
+  text: string;
+  raw: unknown;
+};
+
+type AgentCoreTaskErr = {
+  ok: false;
+  error: string;
+  raw?: unknown;
+};
+
+export type AgentCoreTaskResult = (AgentCoreTaskOk | AgentCoreTaskErr) & {
+  engine: "agentcore_executor";
   trace: AgentCoreTaskTrace;
 };
 
@@ -18,7 +39,9 @@ type ChatMessage = {
   content: string;
 };
 
-function detectProvider(config: Required<Pick<AgentCoreExecutorLlmConfig, "provider" | "baseUrl" | "model">>) {
+function detectProvider(
+  config: Required<Pick<ResolvedAgentCoreLlmConfig, "provider" | "baseUrl" | "model">>,
+) {
   const provider = config.provider.trim().toLowerCase();
   const baseUrl = config.baseUrl.trim().toLowerCase();
   const model = config.model.trim().toLowerCase();
@@ -29,22 +52,13 @@ function detectProvider(config: Required<Pick<AgentCoreExecutorLlmConfig, "provi
   return "openai_compatible";
 }
 
-function hasUsableLlmConfig(
-  config?: AgentCoreExecutorLlmConfig | null,
-): config is Required<AgentCoreExecutorLlmConfig> {
-  return Boolean(
-    config?.apiKey?.trim() &&
-      normalizeBaseUrl(config?.baseUrl ?? "") &&
-      config?.model?.trim(),
-  );
-}
-
 function buildWorkspaceContextText(context?: Record<string, unknown> | null) {
   if (!context || typeof context !== "object") return "";
 
   const entries = Object.entries(context)
-    .filter(([, value]) =>
-      typeof value === "string" || typeof value === "number" || typeof value === "boolean",
+    .filter(
+      ([, value]) =>
+        typeof value === "string" || typeof value === "number" || typeof value === "boolean",
     )
     .map(([key, value]) => `${key}=${String(value).trim()}`)
     .filter((entry) => !entry.endsWith("="));
@@ -107,7 +121,7 @@ function buildAnthropicMessagesUrl(baseUrl: string) {
 }
 
 async function callOpenAiCompatibleModel(
-  config: Required<AgentCoreExecutorLlmConfig>,
+  config: ResolvedAgentCoreLlmConfig,
   messages: ChatMessage[],
   timeoutSeconds: number,
 ) {
@@ -176,7 +190,7 @@ async function callOpenAiCompatibleModel(
 }
 
 async function callAnthropicModel(
-  config: Required<AgentCoreExecutorLlmConfig>,
+  config: ResolvedAgentCoreLlmConfig,
   userMessage: string,
   systemPrompt: string,
   timeoutSeconds: number,
@@ -235,6 +249,133 @@ async function callAnthropicModel(
   }
 }
 
+function waitMs(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function buildFinalTrace(input: {
+  request: AgentCoreTaskRequest;
+  engine: "agentcore_executor";
+  provider?: string;
+  model?: string;
+  startedAt: number;
+  finishedAt: number;
+  success: boolean;
+  error?: string;
+  attempts: AgentCoreTaskTraceAttempt[];
+  fallbackUsed: boolean;
+  skillPlan?: AgentCoreTaskTrace["skillPlan"];
+  skillReceipts?: AgentCoreTaskTrace["skillReceipts"];
+  memory?: AgentCoreTaskTrace["memory"];
+}) {
+  const { request, attempts } = input;
+  return {
+    source: request.metadata.source,
+    engine: input.engine,
+    provider: input.provider,
+    model: input.model,
+    sessionId: request.session.id,
+    requestId: request.metadata.requestId,
+    idempotencyKey: request.metadata.idempotencyKey,
+    startedAt: input.startedAt,
+    finishedAt: input.finishedAt,
+    durationMs: Math.max(0, input.finishedAt - input.startedAt),
+    attemptCount: attempts.length,
+    fallbackUsed: input.fallbackUsed,
+    attempts,
+    skillPlan: input.skillPlan,
+    skillReceipts: input.skillReceipts ?? [],
+    memory: input.memory,
+    success: input.success,
+    error: input.error,
+  } satisfies AgentCoreTaskTrace;
+}
+
+async function attemptModelCandidate(input: {
+  candidateKind: "primary" | "fallback";
+  config: ResolvedAgentCoreLlmConfig;
+  request: AgentCoreTaskRequest;
+  systemPrompt: string;
+  attempts: AgentCoreTaskTraceAttempt[];
+  executionPolicy: ReturnType<typeof normalizeExecutionPolicy>;
+}) {
+  const provider = detectProvider(input.config);
+  const messages: ChatMessage[] = [
+    ...(input.systemPrompt
+      ? ([{ role: "system", content: input.systemPrompt }] as ChatMessage[])
+      : []),
+    { role: "user", content: input.request.taskInput.userMessage },
+  ];
+
+  for (let attemptIndex = 0; attemptIndex < input.executionPolicy.maxAttempts; attemptIndex += 1) {
+    const startedAt = Date.now();
+    try {
+      const text =
+        provider === "anthropic"
+          ? await callAnthropicModel(
+              input.config,
+              input.request.taskInput.userMessage,
+              input.systemPrompt,
+              input.executionPolicy.timeoutSeconds,
+            )
+          : await callOpenAiCompatibleModel(
+              input.config,
+              messages,
+              input.executionPolicy.timeoutSeconds,
+            );
+
+      const finishedAt = Date.now();
+      input.attempts.push({
+        engine: "agentcore_executor",
+        candidateKind: input.candidateKind,
+        provider,
+        model: input.config.model,
+        attemptNumber: input.attempts.length + 1,
+        startedAt,
+        finishedAt,
+        durationMs: Math.max(0, finishedAt - startedAt),
+        success: true,
+      });
+
+      return {
+        ok: true as const,
+        text,
+        provider,
+        model: input.config.model,
+      };
+    } catch (error) {
+      const finishedAt = Date.now();
+      const message = error instanceof Error ? error.message : "执行失败";
+      input.attempts.push({
+        engine: "agentcore_executor",
+        candidateKind: input.candidateKind,
+        provider,
+        model: input.config.model,
+        attemptNumber: input.attempts.length + 1,
+        startedAt,
+        finishedAt,
+        durationMs: Math.max(0, finishedAt - startedAt),
+        success: false,
+        error: message,
+      });
+
+      if (
+        attemptIndex + 1 < input.executionPolicy.maxAttempts &&
+        input.executionPolicy.retryBackoffMs > 0
+      ) {
+        await waitMs(input.executionPolicy.retryBackoffMs * (attemptIndex + 1));
+      }
+    }
+  }
+
+  return {
+    ok: false as const,
+    provider,
+    model: input.config.model,
+    error: input.attempts[input.attempts.length - 1]?.error || "执行失败",
+  };
+}
+
 export async function runAgentCoreTask(
   request: AgentCoreTaskRequest | AgentCoreLegacyTaskRequest,
 ): Promise<AgentCoreTaskResult> {
@@ -243,88 +384,117 @@ export async function runAgentCoreTask(
     "session" in request &&
     "taskInput" in request &&
     "context" in request &&
-    "skillPolicy" in request
+    "skillPolicy" in request &&
+    "metadata" in request
       ? request
       : normalizeAgentCoreTaskRequest(request);
-  const timeoutSeconds = normalizedRequest.executionPolicy.timeoutSeconds;
-  const llm = normalizedRequest.modelConfig ?? null;
   const sessionId = normalizedRequest.session.id;
   const userMessage = normalizedRequest.taskInput.userMessage;
+  const startedAt = Date.now();
+  const attempts: AgentCoreTaskTraceAttempt[] = [];
+  const candidates = buildExecutionCandidates(
+    normalizedRequest.modelConfig ?? null,
+    normalizedRequest.fallbackModelConfigs ?? [],
+  );
+  const executionPolicy = normalizeExecutionPolicy(normalizedRequest.executionPolicy, {
+    hasPrimaryModel: candidates.length > 0,
+  });
+  const skillPlan = buildSkillPlan(normalizedRequest);
+  const preSkill = await runPreExecutionSkills({
+    request: normalizedRequest,
+    skillPlan,
+  });
+  const systemPrompt = [
+    buildAgentCoreSystemPrompt(normalizedRequest),
+    ...preSkill.promptFragments,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 
-  if (!hasUsableLlmConfig(llm)) {
-    const fallback = await runOpenClawAgent({
-      message: userMessage,
-      sessionId,
-      timeoutSeconds,
+  for (const candidate of candidates) {
+    const result = await attemptModelCandidate({
+      candidateKind: candidate.kind,
+      config: candidate.config,
+      request: normalizedRequest,
+      systemPrompt,
+      attempts,
+      executionPolicy,
     });
-    return {
-      ...fallback,
-      engine: "openclaw_cli_fallback",
-      trace: {
-        engine: "openclaw_cli_fallback",
-        sessionId,
-        success: fallback.ok,
-        error: fallback.ok ? undefined : fallback.error,
-      },
-    };
-  }
 
-  const normalizedLlm: Required<AgentCoreExecutorLlmConfig> = {
-    provider: String(llm.provider ?? "openai"),
-    apiKey: llm.apiKey.trim(),
-    baseUrl: normalizeBaseUrl(llm.baseUrl),
-    model: llm.model.trim(),
-  };
-
-  const systemPrompt = buildAgentCoreSystemPrompt(normalizedRequest);
-  const provider = detectProvider(normalizedLlm);
-
-  try {
-    const text =
-      provider === "anthropic"
-        ? await callAnthropicModel(
-            normalizedLlm,
-            userMessage,
-            systemPrompt,
-            timeoutSeconds,
-          )
-        : await callOpenAiCompatibleModel(
-            normalizedLlm,
-            [
-              ...(systemPrompt
-                ? ([{ role: "system", content: systemPrompt }] as ChatMessage[])
-                : []),
-              { role: "user", content: userMessage },
-            ],
-            timeoutSeconds,
-          );
-
-    return {
-      ok: true,
-      text: text.trim(),
-      raw: { provider, sessionId },
-      engine: "agentcore_executor",
-      trace: {
-        engine: "agentcore_executor",
-        provider,
-        model: normalizedLlm.model,
-        sessionId,
+    if (result.ok) {
+      const finishedAt = Date.now();
+      const postSkill = await runPostExecutionSkills({
+        request: normalizedRequest,
+        skillPlan,
+        outputText: result.text.trim(),
         success: true,
-      },
-    };
-  } catch (error) {
-    return {
-      ok: false,
-      error: error instanceof Error ? error.message : "执行失败",
-      engine: "agentcore_executor",
-      trace: {
+      });
+      return {
+        ok: true,
+        text: result.text.trim(),
+        raw: {
+          provider: result.provider,
+          sessionId,
+          requestId: normalizedRequest.metadata.requestId,
+          attempts,
+          skillPlan,
+        },
         engine: "agentcore_executor",
-        provider,
-        model: normalizedLlm.model,
-        sessionId,
-        success: false,
-        error: error instanceof Error ? error.message : "执行失败",
-      },
-    };
+        trace: buildFinalTrace({
+          request: normalizedRequest,
+          engine: "agentcore_executor",
+          provider: result.provider,
+          model: result.model,
+          startedAt,
+          finishedAt,
+          success: true,
+          attempts,
+          fallbackUsed: candidate.kind !== "primary",
+          skillPlan,
+          skillReceipts: [...preSkill.receipts, ...postSkill.receipts],
+          memory: {
+            scope: skillPlan.memoryScope,
+            recalledInstincts: preSkill.memory.recalledInstincts,
+            storedInstinctId: postSkill.memory.storedInstinctId,
+          },
+        }),
+      };
+    }
   }
+
+  const finishedAt = Date.now();
+  const lastAttempt = attempts[attempts.length - 1];
+  const failedPostSkill = await runPostExecutionSkills({
+    request: normalizedRequest,
+    skillPlan,
+    outputText: "",
+    success: false,
+  });
+  return {
+    ok: false,
+    error:
+      lastAttempt?.error ||
+      (candidates.length === 0 ? "缺少可用的 Kimi 配置，请先在设置中填写 API Key。" : "执行失败"),
+    engine: "agentcore_executor",
+    trace: buildFinalTrace({
+      request: normalizedRequest,
+      engine: "agentcore_executor",
+      provider: lastAttempt?.provider,
+      model: lastAttempt?.model,
+      startedAt,
+      finishedAt,
+      success: false,
+      error:
+        lastAttempt?.error ||
+        (candidates.length === 0 ? "缺少可用的 Kimi 配置，请先在设置中填写 API Key。" : "执行失败"),
+      attempts,
+      fallbackUsed: attempts.some((attempt) => attempt.candidateKind !== "primary"),
+      skillPlan,
+      skillReceipts: [...preSkill.receipts, ...failedPostSkill.receipts],
+      memory: {
+        scope: skillPlan.memoryScope,
+        recalledInstincts: preSkill.memory.recalledInstincts,
+      },
+    }),
+  };
 }

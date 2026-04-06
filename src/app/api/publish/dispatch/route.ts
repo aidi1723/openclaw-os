@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { runPublishDispatch, uniqDispatchPlatforms } from "@/lib/server/publish-dispatch";
+import type { ServerLlmConfigInput } from "@/lib/server/direct-llm";
 
 export const runtime = "nodejs";
 
@@ -14,6 +15,7 @@ export async function POST(req: Request) {
           dryRun?: boolean;
           connections?: Record<string, { token?: string; webhookUrl?: string }>;
           timeoutSeconds?: number;
+          llm?: ServerLlmConfigInput;
         };
 
     const title = String(body?.title ?? "").trim();
@@ -33,6 +35,7 @@ export async function POST(req: Request) {
       dryRun: body?.dryRun !== false,
       connections: body?.connections && typeof body.connections === "object" ? body.connections : {},
       timeoutSeconds: body?.timeoutSeconds,
+      llm: body?.llm,
     });
     return NextResponse.json(result, {
       status: result.ok ? 200 : 502,

@@ -125,7 +125,7 @@ export function MediaOpsAppWindow({
     });
 
     if (!hasDirectLlm) {
-      showToast("请先在『设置』中配置大模型（当前优先走 OpenClaw，失败则本地兜底）", "error");
+      showToast("请先在『设置』中填入 Kimi API Key", "error");
     }
 
     resetStreamBuffer();
@@ -137,8 +137,7 @@ export function MediaOpsAppWindow({
     abortRef.current = controller;
 
     try {
-      // 1) Primary: OpenClaw (stable CLI integration)
-      const openclawRes = await fetch(buildAgentCoreApiUrl("/api/openclaw/copy"), {
+      const openclawRes = await fetch(buildAgentCoreApiUrl("/api/agent/copy"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -158,12 +157,11 @@ export function MediaOpsAppWindow({
       if (openclawRes.ok && openclawData?.ok) {
         await typewriter(String(openclawData.text ?? ""), runId);
         if (runId !== runIdRef.current || !mountedRef.current) return;
-        showToast("生成完成（OpenClaw）", "ok");
+        showToast("生成完成（Kimi）", "ok");
         if (taskIdRef.current) updateTask(taskIdRef.current, { status: "done" });
         return;
       }
 
-      // 2) Secondary: direct LLM (if configured)
       if (hasDirectLlm) {
         resetStreamBuffer();
         const systemPrompt = `${systemPromptByPlatform[platform]}\n${getOutputLanguageInstruction()}`;
@@ -256,8 +254,7 @@ export function MediaOpsAppWindow({
         | null
         | { ok?: boolean; error?: string; text?: string };
       if (!fallback.ok || !fallbackData?.ok) {
-        const error =
-          openclawData?.error || fallbackData?.error || "生成失败（OpenClaw 不可用）";
+        const error = openclawData?.error || fallbackData?.error || "生成失败，请检查 Kimi 配置";
         if (runId !== runIdRef.current || !mountedRef.current) return;
         setResult(error);
         showToast("生成失败", "error");

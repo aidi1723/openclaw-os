@@ -1,5 +1,12 @@
 import { NextResponse } from "next/server";
 
+const DEFAULT_PROVIDER_CONFIG = {
+  kimi: {
+    baseUrl: "https://api.moonshot.cn/v1",
+    model: "moonshot-v1-8k",
+  },
+} as const;
+
 function normalizeBaseUrl(input: string) {
   const trimmed = input.trim();
   if (!trimmed) return "";
@@ -38,11 +45,14 @@ export async function POST(req: Request) {
   try {
     const body = (await req.json().catch(() => null)) as
       | null
-      | { apiKey?: string; baseUrl?: string; model?: string };
+      | { apiKey?: string; baseUrl?: string; model?: string; provider?: string };
 
     const apiKey = body?.apiKey?.trim() ?? "";
-    const baseUrl = normalizeBaseUrl(body?.baseUrl ?? "");
-    const model = body?.model?.trim() ?? "";
+    const provider = body?.provider?.trim() === "kimi" ? "kimi" : "kimi";
+    const fallbackBaseUrl = DEFAULT_PROVIDER_CONFIG[provider].baseUrl;
+    const fallbackModel = DEFAULT_PROVIDER_CONFIG[provider].model;
+    const baseUrl = normalizeBaseUrl(body?.baseUrl?.trim() || fallbackBaseUrl);
+    const model = body?.model?.trim() || fallbackModel;
 
     if (!apiKey) {
       return NextResponse.json(

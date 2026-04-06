@@ -193,7 +193,7 @@ export function ProjectOpsAppWindow({
         }),
       );
       updateTask(taskId, { status: "error", detail: errorMessage });
-      showToast("OpenClaw 不可用，已生成本地项目 brief", "error");
+      showToast("智能执行不可用，已生成本地项目 brief", "error");
     } finally {
       setIsGenerating(false);
     }
@@ -315,7 +315,7 @@ export function ProjectOpsAppWindow({
                   <input
                     value={project}
                     onChange={(event) => setProject(event.target.value)}
-                    placeholder="如：OpenClaw Growth Site"
+                    placeholder="如：AgentCore Growth Site"
                     className="w-full rounded-2xl border border-gray-200 px-4 py-3 text-sm outline-none transition focus:border-gray-400"
                   />
                 </label>

@@ -146,7 +146,7 @@ export function SecondBrainAppWindow({
       setDigest(fallback);
       createBrainDigest({ focus, content: fallback });
       updateTask(taskId, { status: "error", detail: errorMessage });
-      showToast("OpenClaw 不可用，已切换本地摘要", "error");
+      showToast("智能执行不可用，已切换本地摘要", "error");
     } finally {
       setIsGenerating(false);
     }

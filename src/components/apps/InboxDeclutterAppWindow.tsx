@@ -228,7 +228,7 @@ export function InboxDeclutterAppWindow({
       setDigest(fallback);
       createInboxDigest({ focus, content: fallback });
       updateTask(taskId, { status: "error", detail: errorMessage });
-      showToast("OpenClaw 不可用，已切换本地 digest", "error");
+      showToast("智能执行不可用，已切换本地 digest", "error");
     } finally {
       setIsGenerating(false);
     }

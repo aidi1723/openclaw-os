@@ -288,7 +288,7 @@ export function MorningBriefAppWindow({
         workflowTriggerType,
       });
       updateTask(taskId, { status: "error", detail: errorMessage });
-      showToast("OpenClaw 不可用，已切换本地晨报", "error");
+      showToast("智能执行不可用，已切换本地晨报", "error");
     } finally {
       setIsGenerating(false);
     }
@@ -327,7 +327,7 @@ export function MorningBriefAppWindow({
             <div>
               <div className="text-lg font-bold text-gray-900">Daily Operating Brief</div>
               <div className="mt-1 text-sm text-gray-500">
-                对应 awesome-openclaw-usecases 里的 Morning Brief。把任务、草稿、重点事项压缩成一份可执行晨报。
+                把任务、草稿、重点事项压缩成一份可执行晨报。
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-2">
@@ -457,7 +457,7 @@ export function MorningBriefAppWindow({
               <div>
                 <div className="text-sm font-semibold text-gray-900">晨报结果</div>
                 <div className="mt-1 text-xs text-gray-500">
-                  优先调用 OpenClaw，不可用时退回本地模板。
+                  优先调用智能执行，不可用时退回本地模板。
                 </div>
               </div>
               <button

@@ -24,6 +24,7 @@ import {
   getDesktopRuntimeStatusSummary,
   getRuntimeBridgeConfig,
 } from "@/lib/desktop-runtime";
+import { addRuntimeEventListener, RuntimeEventNames } from "@/lib/runtime-events";
 import { loadSettings, type AppSettings, type InterfaceLanguage } from "@/lib/settings";
 import { requestOpenSettings } from "@/lib/ui-events";
 
@@ -112,10 +113,10 @@ export function OpenClawConsoleAppWindow({
       setInterfaceLanguage(settings.personalization.interfaceLanguage);
     };
     syncFromSettings();
-    window.addEventListener("openclaw:settings", syncFromSettings);
+    const removeSettingsListener = addRuntimeEventListener(RuntimeEventNames.settings, syncFromSettings);
     window.addEventListener("storage", syncFromSettings);
     return () => {
-      window.removeEventListener("openclaw:settings", syncFromSettings);
+      removeSettingsListener();
       window.removeEventListener("storage", syncFromSettings);
     };
   }, [isVisible]);
@@ -255,7 +256,7 @@ export function OpenClawConsoleAppWindow({
     setIsChecking(true);
     setHealthText("");
     try {
-      const res = await fetch(buildAgentCoreApiUrl("/api/openclaw/gateway/health"), {
+      const res = await fetch(buildAgentCoreApiUrl("/api/runtime/gateway/health"), {
         method: "GET",
       });
       const data = (await res.json().catch(() => null)) as
@@ -306,7 +307,7 @@ export function OpenClawConsoleAppWindow({
       state={state}
       zIndex={zIndex}
       active={active}
-      title="OpenClaw 控制台"
+      title="运行时控制台"
       icon={TerminalSquare}
       widthClassName="w-[980px]"
       storageKey="openclaw.window.openclaw_console"
@@ -969,7 +970,7 @@ export function OpenClawConsoleAppWindow({
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  OpenClaw Base URL
+                  Runtime Base URL
                 </label>
                 <input
                   value={baseUrl}
@@ -1028,7 +1029,7 @@ export function OpenClawConsoleAppWindow({
               <div className="font-semibold text-gray-900 mb-2">建议用法</div>
               <ul className="list-disc pl-5 space-y-1">
                 <li>在 WebOS 里用 Spotlight / 各 App 发起任务；在 TaskManager 里查看状态。</li>
-                <li>需要更深的调试/查看会话时，用上面的链接打开 OpenClaw 控制台。</li>
+                <li>需要更深的调试或查看会话时，用上面的链接打开运行时控制台。</li>
               </ul>
             </div>
           </div>

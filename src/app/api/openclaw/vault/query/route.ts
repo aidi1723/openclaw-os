@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
-import { runOpenClawAgent } from "@/lib/openclaw-cli";
 import {
   getRequestBodyErrorStatus,
   readJsonBodyWithLimit,
 } from "@/lib/server/request-body";
+import { requestServerLlmText, type ServerLlmConfigInput } from "@/lib/server/direct-llm";
 import {
   buildVaultMixedQueryStructuredResult,
   type VaultCreatorAssetSummary,
@@ -30,6 +30,7 @@ export async function POST(req: Request) {
           files?: VaultFileSummary[];
           knowledgeAssets?: VaultKnowledgeAssetSummary[];
           creatorAssets?: VaultCreatorAssetSummary[];
+          llm?: ServerLlmConfigInput;
         };
 
     const query = (body?.query ?? "").trim();
@@ -112,10 +113,11 @@ export async function POST(req: Request) {
       "请用简洁的 Markdown 输出：\n" +
       "【最相关线索】\n- ...\n【判断】\n- ...\n【建议】\n- ...";
 
-    const r = await runOpenClawAgent({
-      sessionId: "webos-vault",
-      message,
-      timeoutSeconds: 60,
+    const r = await requestServerLlmText({
+      llm: body?.llm,
+      userPrompt: message,
+      timeoutMs: 60_000,
+      temperature: 0.2,
     });
     if (!r.ok) return NextResponse.json(r, { status: 502 });
 

@@ -29,6 +29,7 @@ export type AppId =
   | "knowledge_vault"
   | "account_center"
   | "task_manager"
+  | "runtime_console"
   | "openclaw_console"
   | "publisher"
   | "solo_ops"

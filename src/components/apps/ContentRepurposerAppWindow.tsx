@@ -414,7 +414,7 @@ export function ContentRepurposerAppWindow({
         workflowNextStep: "建议人工检查内容包后，再送入 Publisher。",
       });
       updateTask(taskId, { status: "error", detail: errorMessage });
-      showToast("OpenClaw 不可用，已切换本地内容包", "error");
+      showToast("智能执行不可用，已切换本地内容包", "error");
     } finally {
       setIsGenerating(false);
     }

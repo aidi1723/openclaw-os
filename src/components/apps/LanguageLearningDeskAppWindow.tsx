@@ -180,7 +180,7 @@ export function LanguageLearningDeskAppWindow({
       const errorMessage = err instanceof Error ? err.message : "生成失败";
       patchSelected({ lessonPack: fallback });
       updateTask(taskId, { status: "error", detail: errorMessage });
-      showToast("OpenClaw 不可用，已切换本地练习包", "error");
+      showToast("智能执行不可用，已切换本地练习包", "error");
     } finally {
       setIsGenerating(false);
     }
@@ -463,15 +463,15 @@ export function LanguageLearningDeskAppWindow({
                     </label>
                   </div>
 
-                  <div className="rounded-3xl border border-gray-200 bg-[#0b1220] p-5 text-white">
+                  <div className="rounded-3xl border border-gray-200 bg-white p-5 text-gray-900">
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                       <div>
-                        <div className="text-sm font-semibold text-white/90">Lesson pack</div>
-                        <div className="mt-1 text-sm text-white/60">
+                        <div className="text-sm font-semibold text-gray-900">Lesson pack</div>
+                        <div className="mt-1 text-sm text-gray-600">
                           输出翻译重点、场景表达、角色扮演和下一步练习动作。
                         </div>
                       </div>
-                      <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-semibold text-white/75">
+                      <div className="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-gray-50 px-3 py-1.5 text-xs font-semibold text-gray-700">
                         <Sparkles className="h-3.5 w-3.5" />
                         AI + local fallback
                       </div>
@@ -490,7 +490,7 @@ export function LanguageLearningDeskAppWindow({
                       <button
                         type="button"
                         onClick={saveLessonDraft}
-                        className="inline-flex items-center gap-2 rounded-2xl border border-white/15 bg-white/5 px-4 py-3 text-sm font-semibold text-white transition hover:bg-white/10"
+                        className="inline-flex items-center gap-2 rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm font-semibold text-gray-900 transition hover:bg-gray-50"
                       >
                         <FilePlus2 className="h-4 w-4" />
                         保存草稿
@@ -498,7 +498,7 @@ export function LanguageLearningDeskAppWindow({
                       <button
                         type="button"
                         onClick={sendToVault}
-                        className="inline-flex items-center gap-2 rounded-2xl border border-white/15 bg-white/5 px-4 py-3 text-sm font-semibold text-white transition hover:bg-white/10"
+                        className="inline-flex items-center gap-2 rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm font-semibold text-gray-900 transition hover:bg-gray-50"
                       >
                         <BookOpenCheck className="h-4 w-4" />
                         沉淀短句库
@@ -506,15 +506,15 @@ export function LanguageLearningDeskAppWindow({
                       <button
                         type="button"
                         onClick={sendToTasks}
-                        className="inline-flex items-center gap-2 rounded-2xl border border-white/15 bg-white/5 px-4 py-3 text-sm font-semibold text-white transition hover:bg-white/10"
+                        className="inline-flex items-center gap-2 rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm font-semibold text-gray-900 transition hover:bg-gray-50"
                       >
                         <Languages className="h-4 w-4" />
                         写入复习任务
                       </button>
                     </div>
 
-                    <div className="mt-5 rounded-[28px] border border-white/10 bg-black/20 p-4">
-                      <pre className="max-h-[540px] overflow-auto whitespace-pre-wrap break-words text-sm leading-7 text-white/85">
+                    <div className="mt-5 rounded-[28px] border border-gray-200 bg-gray-50 p-4">
+                      <pre className="max-h-[540px] overflow-auto whitespace-pre-wrap break-words text-sm leading-7 text-gray-900">
                         {selected.lessonPack.trim() ||
                           "点击“生成学习包”后，这里会出现翻译重点、短句、角色扮演和复习动作。"}
                       </pre>

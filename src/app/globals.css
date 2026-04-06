@@ -15,15 +15,44 @@ body {
   overflow: hidden;
   background: #000;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", "Noto Sans SC", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "WenQuanYi Micro Hei", sans-serif;
-  color: #f8fafc;
+  color: #0f172a;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
 
 html {
-  color-scheme: dark;
+  color-scheme: light;
 }
 
 body {
   overscroll-behavior: none;
+}
+
+.app-window-content {
+  color: #0f172a;
+}
+
+.app-window-content input,
+.app-window-content textarea,
+.app-window-content select,
+.app-window-content option {
+  color: #111827;
+}
+
+.app-window-content ::placeholder {
+  color: #6b7280;
+  opacity: 1;
+}
+
+.app-window-content table {
+  width: 100%;
+}
+
+.app-window-content th,
+.app-window-content td {
+  color: #111827;
+  white-space: normal;
+  word-break: normal;
+  overflow-wrap: break-word;
+  vertical-align: top;
 }

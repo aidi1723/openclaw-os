@@ -188,7 +188,7 @@ export function RecruitingDeskAppWindow({
         }),
       );
       updateTask(taskId, { status: "error", detail: errorMessage });
-      showToast("OpenClaw 不可用，已生成本地评分卡", "error");
+      showToast("智能执行不可用，已生成本地评分卡", "error");
     } finally {
       setIsGenerating(false);
     }

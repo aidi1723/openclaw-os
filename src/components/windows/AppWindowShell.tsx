@@ -4,6 +4,7 @@ import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import { Minus, X } from "lucide-react";
+import { addRuntimeEventListener, RuntimeEventNames } from "@/lib/runtime-events";
 
 type DragOffset = { dx: number; dy: number };
 type WindowSize = { width: number; height: number };
@@ -524,8 +525,7 @@ export function AppWindowShell({
       if (!command) return;
       onWindowCommand(command);
     };
-    window.addEventListener("openclaw:window-command", onCmd);
-    return () => window.removeEventListener("openclaw:window-command", onCmd);
+    return addRuntimeEventListener(RuntimeEventNames.windowCommand, onCmd);
   }, [onWindowCommand, storageKey]);
 
   useEffect(() => {
@@ -616,7 +616,7 @@ export function AppWindowShell({
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-auto bg-[linear-gradient(180deg,rgba(248,250,252,0.86)_0%,rgba(255,255,255,0.94)_100%)]">
+      <div className="app-window-content min-h-0 flex-1 overflow-auto bg-[linear-gradient(180deg,rgba(248,250,252,0.86)_0%,rgba(255,255,255,0.94)_100%)] text-slate-900">
         {children}
       </div>
 

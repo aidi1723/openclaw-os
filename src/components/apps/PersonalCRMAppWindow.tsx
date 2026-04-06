@@ -230,7 +230,7 @@ export function PersonalCRMAppWindow({
       const errorMessage = err instanceof Error ? err.message : "生成失败";
       setSuggestion(fallback);
       updateTask(taskId, { status: "error", detail: errorMessage });
-      showToast("OpenClaw 不可用，已切换本地建议", "error");
+      showToast("智能执行不可用，已切换本地建议", "error");
     } finally {
       setIsGenerating(false);
     }
@@ -394,7 +394,7 @@ export function PersonalCRMAppWindow({
             <div>
               <div className="text-lg font-bold text-gray-900">Personal CRM</div>
               <div className="mt-1 text-sm text-gray-500">
-                对应 awesome-openclaw-usecases 里的 Personal CRM。维护联系人、跟进状态，并快速生成下一步触达建议。
+                维护联系人、跟进状态，并快速生成下一步触达建议。
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-2">

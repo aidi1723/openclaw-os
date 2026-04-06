@@ -283,7 +283,7 @@ export function DeepResearchHubAppWindow({
         workflowNextStep: "建议人工检查后，再送入知识库或晨报。",
       });
       updateTask(taskId, { status: "error", detail: errorMessage });
-      showToast("OpenClaw 不可用，已切换本地研究简报", "error");
+      showToast("智能执行不可用，已切换本地研究简报", "error");
     } finally {
       setIsGenerating(false);
     }

@@ -284,8 +284,8 @@ const appList: AppManifest[] = [
     dock: true,
   },
   {
-    id: "openclaw_console",
-    name: "OpenClaw 控制台",
+    id: "runtime_console",
+    name: "运行时控制台",
     icon: TerminalSquare,
     window: OpenClawConsoleAppWindow,
     desktop: true,
@@ -326,7 +326,8 @@ const appList: AppManifest[] = [
 ];
 
 export function getApp(appId: AppId) {
-  const app = appList.find((a) => a.id === appId);
+  const resolvedId = appId === "openclaw_console" ? "runtime_console" : appId;
+  const app = appList.find((a) => a.id === resolvedId);
   if (!app) throw new Error(`Unknown app: ${appId}`);
   return app;
 }

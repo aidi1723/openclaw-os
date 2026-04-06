@@ -147,7 +147,7 @@ export function SocialMediaAutopilotAppWindow({
       const errorMessage = err instanceof Error ? err.message : "生成失败";
       patchSelected({ outputPack: fallback });
       updateTask(taskId, { status: "error", detail: errorMessage });
-      showToast("OpenClaw 不可用，已切换本地输出包", "error");
+      showToast("智能执行不可用，已切换本地输出包", "error");
     } finally {
       setIsGenerating(false);
     }

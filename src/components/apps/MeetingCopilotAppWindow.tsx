@@ -138,7 +138,7 @@ export function MeetingCopilotAppWindow({
         }),
       );
       updateTask(taskId, { status: "error", detail: errorMessage });
-      showToast("OpenClaw 不可用，已生成本地纪要", "error");
+      showToast("智能执行不可用，已生成本地纪要", "error");
     } finally {
       setIsGenerating(false);
     }
@@ -219,7 +219,7 @@ export function MeetingCopilotAppWindow({
             <div>
               <div className="text-lg font-bold text-gray-900">Meeting Notes & Action Items</div>
               <div className="mt-1 text-sm text-gray-500">
-                对应 awesome-openclaw-usecases 里的 Meeting Notes。把原始记录压缩成纪要、决议和待办，并能直接写入任务中心。
+                把原始记录压缩成纪要、决议和待办，并能直接写入任务中心。
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-2">

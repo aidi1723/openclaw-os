@@ -36,6 +36,7 @@ import {
 } from "@/lib/app-display";
 import { buildAgentCoreApiUrl } from "@/lib/app-api";
 import { listAgentProfiles } from "@/lib/agent-profiles";
+import { addRuntimeEventListener, RuntimeEventNames } from "@/lib/runtime-events";
 import {
   getDesktopRuntimeStatusSummary,
   getRuntimeBridgeConfig,
@@ -204,8 +205,7 @@ export function SettingsAppWindow({
       if (!detail?.tab) return;
       setActiveTab(detail.tab);
     };
-    window.addEventListener("openclaw:settings-focus", onFocusSettings);
-    return () => window.removeEventListener("openclaw:settings-focus", onFocusSettings);
+    return addRuntimeEventListener(RuntimeEventNames.settingsFocus, onFocusSettings);
   }, []);
 
   useEffect(() => {
@@ -238,10 +238,6 @@ export function SettingsAppWindow({
     () =>
       [
         { id: "kimi" as const, name: "Kimi (Moonshot)", badge: "推荐" },
-        { id: "deepseek" as const, name: "DeepSeek", badge: "高速" },
-        { id: "openai" as const, name: "OpenAI", badge: "通用" },
-        { id: "anthropic" as const, name: "Claude (Anthropic)", badge: "高级" },
-        { id: "qwen" as const, name: "通义千问", badge: "国产" },
       ] as const,
     [],
   );
@@ -550,6 +546,7 @@ export function SettingsAppWindow({
           apiKey: active.config.apiKey,
           baseUrl: active.config.baseUrl,
           model: active.config.model,
+          provider: active.id,
         }),
       });
       const data = (await res.json().catch(() => ({}))) as {
@@ -722,10 +719,10 @@ export function SettingsAppWindow({
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <div>
                       <div className="text-sm font-semibold text-gray-900">
-                        模型库列表
+                        Kimi 引擎
                       </div>
                       <div className="text-xs text-gray-500 mt-1">
-                        为不同引擎分别保存 Key / Base URL / Model，并一键切换当前引擎。
+                        默认使用 Kimi。只填 API Key 即可测试，Base URL 与 Model 会自动补齐。
                       </div>
                     </div>
                     <button
